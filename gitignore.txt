@@ -1,0 +1,51 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# ─── Virtual Environment ──────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+ENV/
+
+# ─── PyTorch / ML artifacts ───────────────────────────────────────────────────
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+runs/                           # TensorBoard logs
+
+# ─── Data / Results ───────────────────────────────────────────────────────────
+benchmarks/results/*.csv
+benchmarks/results/*.json
+benchmarks/results/*.png
+*.log
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/settings.json           # keep .vscode/ but ignore personal settings
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Jupyter (if used for analysis) ──────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+# docker-compose.override.yml   # uncomment if you add local overrides
+
+# ─── Environment variables (for later when you add API keys etc.) ─────────────
+.env
+.env.local
+secrets.yaml
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini

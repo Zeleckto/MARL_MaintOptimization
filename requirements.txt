@@ -1,0 +1,34 @@
+# ─── Core ML ──────────────────────────────────────────────────────────────────
+torch==2.6.0+cu124
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch-geometric>=2.5.0          # PyG — TGIN implementation
+numpy>=1.26.0
+ 
+# ─── RL / Environment ─────────────────────────────────────────────────────────
+pettingzoo>=1.24.0              # AEC multi-agent environment API
+gymnasium>=0.29.0               # base gym API (PettingZoo dependency)
+ 
+# ─── Optimisation (Tier 1) ────────────────────────────────────────────────────
+ortools>=9.8.0                  # Google OR-Tools CP-SAT solver
+ 
+# ─── Visualisation ────────────────────────────────────────────────────────────
+pygame>=2.5.0                   # pygame renderer for environment
+ 
+# ─── Config ───────────────────────────────────────────────────────────────────
+pyyaml>=6.0.1                   # loading .yaml config files
+ 
+# ─── Logging / Monitoring ─────────────────────────────────────────────────────
+tensorboard>=2.16.0             # training analytics
+ 
+# ─── Testing ──────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+ 
+# ─── Utilities ────────────────────────────────────────────────────────────────
+scipy>=1.12.0                   # Weibull MLE fitting when real data arrives
+matplotlib>=3.8.0               # offline plotting for benchmarks/results
+ 
+# ─── PyG dependencies (install separately if PyG install fails) ───────────────
+# pip install torch-scatter torch-sparse torch-cluster -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
+# Replace cu121 with your CUDA version (check: nvcc --version)
+# For CPU only: replace cu121 with cpu
+ 

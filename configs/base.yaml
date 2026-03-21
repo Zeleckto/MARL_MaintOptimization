@@ -1,0 +1,190 @@
+# configs/base.yaml
+# =================
+# Master configuration. All other phase configs inherit from this.
+# Change values here to affect all phases unless overridden in phase configs.
+
+# ─── Reproducibility ──────────────────────────────────────────────────────
+seed: 42
+
+# ─── Stochasticity phase (overridden in phase1/2/3.yaml) ──────────────────
+# 1 = Weibull failures only
+# 2 = Phase 1 + LogNormal proc times, Beta repair effectiveness
+# 3 = Phase 2 + Poisson arrivals, LogNormal lead times
+stochasticity_level: 1
+
+# ─── Environment ──────────────────────────────────────────────────────────
+environment:
+  n_parallel_envs: 4            # parallel CPU environments for rollout collection
+  max_jobs_in_system: 30        # cap on simultaneous jobs (Phase 3 Poisson guard)
+
+# ─── Episode ──────────────────────────────────────────────────────────────
+episode:
+  t_max_train: 200              # timesteps per training episode
+  t_max_eval: 500               # timesteps per evaluation episode
+  dt_hours: 8.0                 # hours per timestep (1 shift)
+
+# ─── Degradation (Weibull + Kijima) ───────────────────────────────────────
+degradation:
+  dt_hours: 8.0                 # must match episode.dt_hours
+  q_fixed: 0.5                  # Phase 1: fixed repair effectiveness
+  alpha_q: 5.0                  # Phase 2+: Beta distribution alpha
+  beta_q: 5.0                   # Phase 2+: Beta distribution beta
+
+# ─── Machines (M=5 benchmark instance) ────────────────────────────────────
+# beta, eta in hours. delta_h in health units per operating shift.
+# h_restore values are rough guides — Kijima q modulates actual restoration.
+machines:
+  - machine_id: 0
+    name: "CNC Mill"
+    beta: 2.8
+    eta: 3000.0
+    delta_h: 0.5            # loses 0.5 health per shift => fails ~200 shifts naturally
+    h_PM_threshold: 40.0
+    h_critical: 10.0
+    tau_PM_shifts: 3
+    tau_CM_shifts: 8
+    h_restore_PM: 30.0
+    h_restore_CM: 60.0
+
+  - machine_id: 1
+    name: "Lathe"
+    beta: 2.2
+    eta: 2500.0
+    delta_h: 0.55
+    h_PM_threshold: 40.0
+    h_critical: 10.0
+    tau_PM_shifts: 2
+    tau_CM_shifts: 6
+    h_restore_PM: 28.0
+    h_restore_CM: 55.0
+
+  - machine_id: 2
+    name: "Press"
+    beta: 1.8
+    eta: 2000.0
+    delta_h: 0.7             # degrades fastest — will fail within 200-step episode
+    h_PM_threshold: 45.0
+    h_critical: 10.0
+    tau_PM_shifts: 4
+    tau_CM_shifts: 10
+    h_restore_PM: 35.0
+    h_restore_CM: 65.0
+
+  - machine_id: 3
+    name: "Grinder"
+    beta: 3.2
+    eta: 1800.0
+    delta_h: 0.8             # heavy wear-out
+    h_PM_threshold: 50.0
+    h_critical: 10.0
+    tau_PM_shifts: 3
+    tau_CM_shifts: 8
+    h_restore_PM: 40.0
+    h_restore_CM: 70.0
+
+  - machine_id: 4
+    name: "Drill"
+    beta: 1.5
+    eta: 3500.0
+    delta_h: 0.4             # slow degradation, near-random failures
+    h_PM_threshold: 35.0
+    h_critical: 10.0
+    tau_PM_shifts: 2
+    tau_CM_shifts: 5
+    h_restore_PM: 25.0
+    h_restore_CM: 50.0
+
+# ─── Resources (R=6 types) ────────────────────────────────────────────────
+resources:
+  renewable:
+    - resource_id: 0
+      name: "Technicians"
+      capacity: 3              # K_r: max simultaneous technicians
+
+    - resource_id: 1
+      name: "Tools"
+      capacity: 4
+
+    - resource_id: 2
+      name: "Maintenance Bays"
+      capacity: 2
+
+  consumable:
+    - resource_id: 3
+      name: "Spare Parts"
+      initial_inventory: 20
+      lead_time_shifts: 5       # L_r: replenishment lead time in timesteps
+      reorder_cost: 10.0
+
+    - resource_id: 4
+      name: "Lubricants"
+      initial_inventory: 15
+      lead_time_shifts: 3
+      reorder_cost: 5.0
+
+    - resource_id: 5
+      name: "Consumable Tools"
+      initial_inventory: 10
+      lead_time_shifts: 4
+      reorder_cost: 8.0
+
+# ─── Reward weights ───────────────────────────────────────────────────────
+# Stored here AND in rewards/reward_weights.yaml (yaml wins if both exist)
+reward:
+  c_fail: 30.0
+  c_PM: 1.0
+  c_CM: 3.0
+  w_avail: 2.0
+  w_tard: 5.0
+  w_comp: 3.0
+  w_health: 0.5
+  lambda_shared: 0.3           # coupling strength of shared failure penalty
+
+# ─── MAPPO Hyperparameters (Table B.1 from report) ────────────────────────
+mappo:
+  lr_actor1: 0.0001            # Agent 1 (MLP) — lower lr, converges faster
+  lr_actor2: 0.0003            # Agent 2 (TGIN) — higher lr, slower convergence
+  lr_critic: 0.001
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  entropy_coef: 0.01
+  value_loss_coef: 0.5
+  max_grad_norm: 0.5
+  rollout_steps: 2048          # steps collected before each PPO update
+  ppo_epochs: 10
+  minibatch_size: 64
+
+# ─── TGIN Architecture ────────────────────────────────────────────────────
+tgin:
+  n_layers: 3                  # L: number of message passing rounds
+  hidden_dim: 256
+  eps: 0.0                     # GIN epsilon (learnable if set to null)
+  op_feature_dim: 10
+  machine_feature_dim: 15
+  job_feature_dim: 7
+
+# ─── Agent 1 MLP ──────────────────────────────────────────────────────────
+mlp_policy:
+  hidden_dims: [256, 256]
+
+# ─── Critic ───────────────────────────────────────────────────────────────
+critic:
+  hidden_dims: [512, 256]
+
+# ─── Job Parameters (Phase 1: batch at episode start) ─────────────────────
+jobs:
+  n_jobs_train: 20             # jobs released at episode start in Phase 1+2
+  n_ops_per_job_min: 2
+  n_ops_per_job_max: 5
+  lambda_arr: 0.5              # Phase 3 only: Poisson arrival rate (jobs/shift)
+
+# ─── Processing time noise (Phase 2+) ─────────────────────────────────────
+processing:
+  sigma_log: 0.15              # log-space std deviation for LogNormal noise
+
+# ─── Logging ──────────────────────────────────────────────────────────────
+logging:
+  tensorboard_dir: "runs/"
+  checkpoint_dir: "checkpoints/"
+  log_every_n_episodes: 10

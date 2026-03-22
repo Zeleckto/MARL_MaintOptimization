@@ -1,0 +1,3 @@
+# configs/phase3.yaml
+# Phase 3: Full stochasticity. Poisson job arrivals + LogNormal lead times.
+stochasticity_level: 3

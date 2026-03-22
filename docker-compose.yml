@@ -1,0 +1,60 @@
+# docker-compose.yml
+# ===================
+# Two services:
+#   train:  Main training container with GPU access
+#   tb:     TensorBoard monitoring (CPU only, always on)
+#
+# Usage:
+#   docker compose up -d tb          # start TensorBoard
+#   docker compose run train          # start training
+#   docker compose run train python scripts/render_episode.py
+#
+# Access TensorBoard at: http://localhost:6006
+
+version: "3.8"
+
+services:
+
+  train:
+    build: .
+    image: manufacturing_marl:latest
+    # GPU access for RTX 3060
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      # Mount code for live editing without rebuild
+      - .:/app
+      # Persist training outputs outside container
+      - ./runs:/app/runs
+      - ./checkpoints:/app/checkpoints
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONPATH=/app
+    # Override with specific script:
+    # docker compose run train python scripts/train.py --config configs/phase1.yaml
+    command: python scripts/train.py --config configs/phase1.yaml
+
+  tb:
+    # TensorBoard monitoring — no GPU needed
+    image: tensorflow/tensorflow:latest
+    ports:
+      - "6006:6006"
+    volumes:
+      - ./runs:/runs:ro
+    command: tensorboard --logdir /runs --host 0.0.0.0 --port 6006
+    restart: unless-stopped
+
+  test:
+    build: .
+    image: manufacturing_marl:latest
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+    command: python -m pytest tests/ -v --tb=short

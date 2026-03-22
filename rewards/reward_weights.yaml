@@ -1,0 +1,28 @@
+# rewards/reward_weights.yaml
+# All reward weight coefficients. Never hardcode these in Python.
+# Edit here to retune without touching any .py files.
+
+# Failure penalty (shared between both agents)
+c_fail: 30.0
+
+# Agent 1 (PDM) costs
+c_PM: 1.0            # cost per PM action
+c_CM: 3.0            # cost per CM action
+
+# Agent 1 dense bonus
+w_avail: 2.0         # system availability bonus each step
+
+# Agent 2 (Job Shop) components
+w_tard: 5.0          # weighted tardiness penalty
+w_comp: 3.0          # job completion bonus per step
+w_health: 0.5        # health-aware dispatch bonus (keep small)
+
+# Coupling strength of shared failure penalty to each agent
+lambda_shared: 0.3
+
+# Objective scalarisation weights (eq. 3.14 in report)
+# Start: alpha=1 (tardiness) + gamma=1 (maintenance). Add beta/delta later.
+alpha: 1.0           # tardiness weight
+beta_obj: 0.0        # makespan weight (activate in Phase 2)
+gamma_obj: 1.0       # maintenance cost weight
+delta_obj: 0.0       # resource cost weight (activate in Phase 2)

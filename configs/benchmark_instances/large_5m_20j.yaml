@@ -1,0 +1,19 @@
+# configs/benchmark_instances/large_5m_20j.yaml
+# Large instance: M=5 machines, J=20 jobs
+# Full training scale — Tier 1 not tractable here
+
+stochasticity_level: 1
+
+episode:
+  t_max_train: 200
+  t_max_eval: 500
+  dt_hours: 8.0
+
+jobs:
+  n_jobs_train: 20
+  n_ops_per_job_min: 2
+  n_ops_per_job_max: 5
+  lambda_arr: 0.5   # Phase 3 arrivals enabled at this scale
+
+processing:
+  sigma_log: 0.15

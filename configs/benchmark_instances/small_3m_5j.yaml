@@ -1,0 +1,85 @@
+# configs/benchmark_instances/small_3m_5j.yaml
+# Small benchmark: M=3 machines, J=5 jobs
+# Used for Tier 1 vs Tier 3 comparison (CP-SAT solves this optimally in seconds)
+
+stochasticity_level: 1
+
+episode:
+  t_max_train: 200
+  t_max_eval: 500
+  dt_hours: 8.0
+
+machines:
+  - machine_id: 0
+    name: "CNC Mill"
+    beta: 2.8
+    eta: 3000.0
+    delta_h: 0.5
+    h_PM_threshold: 40.0
+    h_critical: 10.0
+    tau_PM_shifts: 3
+    tau_CM_shifts: 8
+    h_restore_PM: 30.0
+    h_restore_CM: 60.0
+
+  - machine_id: 1
+    name: "Lathe"
+    beta: 2.2
+    eta: 2500.0
+    delta_h: 0.55
+    h_PM_threshold: 40.0
+    h_critical: 10.0
+    tau_PM_shifts: 2
+    tau_CM_shifts: 6
+    h_restore_PM: 28.0
+    h_restore_CM: 55.0
+
+  - machine_id: 2
+    name: "Press"
+    beta: 1.8
+    eta: 2000.0
+    delta_h: 0.7
+    h_PM_threshold: 45.0
+    h_critical: 10.0
+    tau_PM_shifts: 4
+    tau_CM_shifts: 10
+    h_restore_PM: 35.0
+    h_restore_CM: 65.0
+
+resources:
+  renewable:
+    - resource_id: 0
+      name: "Technicians"
+      capacity: 2
+    - resource_id: 1
+      name: "Tools"
+      capacity: 3
+    - resource_id: 2
+      name: "Maintenance Bays"
+      capacity: 1
+
+  consumable:
+    - resource_id: 3
+      name: "Spare Parts"
+      initial_inventory: 15
+      lead_time_shifts: 5
+      reorder_cost: 10.0
+    - resource_id: 4
+      name: "Lubricants"
+      initial_inventory: 10
+      lead_time_shifts: 3
+      reorder_cost: 5.0
+    - resource_id: 5
+      name: "Consumable Tools"
+      initial_inventory: 8
+      lead_time_shifts: 4
+      reorder_cost: 8.0
+
+jobs:
+  n_jobs_train: 5
+  n_ops_per_job_min: 2
+  n_ops_per_job_max: 3
+  lambda_arr: 0.0
+
+processing:
+  sigma_log: 0.0   # deterministic for Tier 1 comparison

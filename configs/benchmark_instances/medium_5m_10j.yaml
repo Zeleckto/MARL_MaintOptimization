@@ -1,0 +1,21 @@
+# configs/benchmark_instances/medium_5m_10j.yaml
+# Medium benchmark: M=5 machines, J=10 jobs
+# Primary benchmark instance for paper results
+
+stochasticity_level: 1
+
+episode:
+  t_max_train: 200
+  t_max_eval: 500
+  dt_hours: 8.0
+
+# Uses full M=5 machine set from base.yaml
+# Override only job count
+jobs:
+  n_jobs_train: 10
+  n_ops_per_job_min: 2
+  n_ops_per_job_max: 4
+  lambda_arr: 0.0
+
+processing:
+  sigma_log: 0.15

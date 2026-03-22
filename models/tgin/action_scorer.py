@@ -8,7 +8,7 @@ This is the policy head for Agent 2.
 Input:  TGIN output embeddings + valid pair indices
 Output: Categorical distribution over valid pairs + WAIT action
 """
-
+from __future__ import annotations
 from typing import List, Tuple, Dict, Optional
 
 try:

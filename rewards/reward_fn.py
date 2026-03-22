@@ -7,7 +7,7 @@ Called once per full timestep from mfg_env.py after physics resolution.
 Loads weights from reward_weights.yaml at init time.
 Never hardcodes any coefficient.
 """
-
+from __future__ import annotations
 import os
 import yaml
 from typing import List, Tuple, Optional

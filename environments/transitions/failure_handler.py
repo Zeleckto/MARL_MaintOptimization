@@ -26,7 +26,7 @@ Usage:
     handler = FailureHandler(config)
     failures, preempted_ops = handler.check_and_handle(machine_states, jobs)
 """
-
+from __future__ import annotations
 from typing import List, Tuple, Dict
 import numpy as np
 

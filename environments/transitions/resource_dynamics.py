@@ -27,7 +27,7 @@ Usage:
     state = manager.reset()
     state = manager.step(state, maintenance_actions, order_actions, rng)
 """
-
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple
 import numpy as np

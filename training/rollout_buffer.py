@@ -11,7 +11,7 @@ Key design points:
        - Truncated  (hit T_max):      bootstrap V = V_phi(s_T) (critic estimate)
     4. Returns generator for minibatch sampling during PPO update
 """
-
+from __future__ import annotations
 from typing import List, Tuple, Optional, Generator
 import numpy as np
 

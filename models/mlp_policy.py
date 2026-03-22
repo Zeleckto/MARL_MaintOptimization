@@ -11,7 +11,7 @@ Output: Two heads:
 Masking applied BEFORE softmax (set invalid logits to -inf).
 This ensures invalid actions have exactly zero probability.
 """
-
+from __future__ import annotations
 from typing import Tuple, Optional, List
 
 try:

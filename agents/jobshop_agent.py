@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 agents/jobshop_agent.py
 ========================
@@ -73,7 +74,7 @@ class JobShopAgent:
             embeddings = self.tgin(graph)
             dist, logits = self.action_scorer(embeddings, valid_pairs, op_id_map)
             action_idx = dist.sample().item()
-            log_prob   = dist.log_prob(torch.tensor(action_idx)).item()
+            log_prob   = dist.log_prob(torch.tensor(action_idx, device=self.device)).item()
             entropy    = dist.entropy().item()
 
         # Decode action

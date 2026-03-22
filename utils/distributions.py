@@ -21,7 +21,7 @@ Usage:
     rng = np.random.default_rng(seed=42)
     failed = sample_weibull_failure(virtual_age=150.0, beta=2.8, eta=3000.0, dt=8.0, rng=rng)
 """
-
+from __future__ import annotations
 import numpy as np
 from typing import Optional
 

@@ -32,7 +32,7 @@ Usage:
     engine = DegradationEngine(config)
     state = engine.tick(state, is_operating=True, rng=rng)
 """
-
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import numpy as np

@@ -28,7 +28,7 @@ Usage:
     engine = JobDynamicsEngine(config)
     jobs = engine.generate_job_batch(n_jobs=20, rng=rng)
 """
-
+from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 import numpy as np

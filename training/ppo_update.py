@@ -14,7 +14,7 @@ Key notes:
     - Advantage normalisation per agent independently
     - Gradient clipping (max_grad_norm=0.5)
 """
-
+from __future__ import annotations
 from typing import Tuple
 import numpy as np
 

@@ -21,7 +21,7 @@ Output:
     Per-node embeddings {h_op, h_machine, h_job} of shape [n_nodes, hidden_dim]
     These are passed to action_scorer.py for (op, machine) pair scoring.
 """
-
+from __future__ import annotations
 from typing import Dict, Tuple, Optional
 
 try:

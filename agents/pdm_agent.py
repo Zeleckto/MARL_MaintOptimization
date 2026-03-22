@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 agents/pdm_agent.py
 ====================
@@ -71,6 +72,10 @@ class PDMAgent:
 
         import torch
 
+        # Handle case where obs_np comes from env.reset() dict
+        if isinstance(obs_np, dict):
+            from environments.mfg_env import AGENT_PDM
+            obs_np = obs_np[AGENT_PDM]
         obs_t = torch.tensor(obs_np, dtype=torch.float32).unsqueeze(0).to(self.device)
 
         # Build masks

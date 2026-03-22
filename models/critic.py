@@ -14,7 +14,7 @@ Per-type pooling then concatenation preserves it at identical compute cost.
 The critic sees EVERYTHING — global state including both agents' information.
 Only used during TRAINING, never during execution (CTDE paradigm).
 """
-
+from __future__ import annotations
 from typing import Dict, Optional
 
 try:

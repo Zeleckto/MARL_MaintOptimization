@@ -424,14 +424,27 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
 
     def _compute_rewards(self) -> None:
         """Compute and store rewards for both agents."""
+        # Build eligible_map for criticality weighting: machine -> ops that need it
+        eligible_map = {}
+        n_pending = 0
+        for job in self.jobs:
+            for op in job.operations:
+                if op.status in (0, 1, 2):   # PENDING, READY, IN_PROGRESS
+                    n_pending += 1
+                    for m in op.eligible_machines:
+                        eligible_map.setdefault(m, []).append((job.job_id, op.op_idx))
+
         r1, r2, r_shared = self.reward_fn.compute(
-            maintenance_actions=self._last_maintenance_actions,
-            ordering_cost=self._last_ordering_cost,
-            machine_states=self.machine_states,
-            newly_failed_machine_ids=self._newly_failed,
-            jobs=self.jobs,
-            completed_job_ids=self._completed_job_ids,
-            assignment=self._last_assignment,
+            maintenance_actions      = self._last_maintenance_actions,
+            ordering_cost            = self._last_ordering_cost,
+            machine_states           = self.machine_states,
+            newly_failed_machine_ids = self._newly_failed,
+            jobs                     = self.jobs,
+            completed_job_ids        = self._completed_job_ids,
+            assignment               = self._last_assignment,
+            current_step             = self.current_step,
+            eligible_map             = eligible_map,
+            n_pending_ops            = n_pending,
         )
         self.rewards[AGENT_PDM]     = r1
         self.rewards[AGENT_JOBSHOP] = r2

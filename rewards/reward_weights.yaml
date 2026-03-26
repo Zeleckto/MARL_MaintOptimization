@@ -1,28 +1,37 @@
 # rewards/reward_weights.yaml
-# All reward weight coefficients. Never hardcode these in Python.
+# ============================
+# All reward coefficients in one place.
+# Never hardcode these in Python.
 # Edit here to retune without touching any .py files.
+#
+# Cost hierarchy (industrial standard):
+#   c_fail >> c_CM > c_PM
+#   Bottleneck failure multiplier applied on top via criticality weighting.
 
-# Failure penalty (shared between both agents)
-c_fail: 30.0
+# ── Failure penalty ────────────────────────────────────────────────────────
+c_fail: 30.0               # base failure cost
+criticality_multiplier: 5.0  # bottleneck machine failure costs (1 + 5*crit) * c_fail
+lambda_shared: 0.3         # fraction of R_shared each agent receives
 
-# Agent 1 (PDM) costs
-c_PM: 1.0            # cost per PM action
-c_CM: 3.0            # cost per CM action
+# ── Agent 1 (PDM) costs ────────────────────────────────────────────────────
+c_PM: 1.0                  # cost per PM action (lowest — proactive is cheap)
+c_CM: 3.0                  # cost per CM action (reactive is expensive)
+delta_obj: 0.5             # weight on resource ordering cost (eq. 3.14 δ)
 
-# Agent 1 dense bonus
-w_avail: 2.0         # system availability bonus each step
+# ── Agent 1 dense bonuses ──────────────────────────────────────────────────
+w_avail: 2.0               # system availability bonus per step
+w_RUL: 0.5                 # RUL preservation bonus (new — ties reward to Weibull reliability)
+# RUL bonus fires when mean_RUL / eta_mean > threshold
+rul_threshold: 0.3         # below this fraction of eta, no RUL bonus
 
-# Agent 2 (Job Shop) components
-w_tard: 5.0          # weighted tardiness penalty
-w_comp: 3.0          # job completion bonus per step
-w_health: 0.5        # health-aware dispatch bonus (keep small)
+# ── Agent 2 (Job Shop) weights ─────────────────────────────────────────────
+alpha: 1.0                 # tardiness weight (eq. 3.14 α)
+w_tard: 5.0                # scales normalised tardiness penalty
+w_comp: 3.0                # job completion bonus per job finished this step
+w_health: 0.5              # health-aware dispatch bonus per assignment
+beta_makespan: 0.2         # running makespan estimate penalty (eq. 3.14 β, small)
 
-# Coupling strength of shared failure penalty to each agent
-lambda_shared: 0.3
-
-# Objective scalarisation weights (eq. 3.14 in report)
-# Start: alpha=1 (tardiness) + gamma=1 (maintenance). Add beta/delta later.
-alpha: 1.0           # tardiness weight
-beta_obj: 0.0        # makespan weight (activate in Phase 2)
-gamma_obj: 1.0       # maintenance cost weight
-delta_obj: 0.0       # resource cost weight (activate in Phase 2)
+# ── Objective scalarisation (for paper reporting, eq. 3.14) ───────────────
+# These mirror alpha/beta/gamma/delta in the report objective.
+# Not used in reward computation directly — used in benchmarks/metrics.py
+gamma_obj: 1.0             # maintenance cost weight

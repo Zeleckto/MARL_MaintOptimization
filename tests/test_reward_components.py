@@ -34,6 +34,8 @@ MACHINE_CFGS = [
     for i in range(5)
 ]
 
+DEFAULT_ETA = [3000.0] * 5
+
 DEFAULT_WEIGHTS = {
     "c_fail": 30.0, "c_PM": 1.0, "c_CM": 3.0,
     "w_avail": 2.0, "w_tard": 5.0, "w_comp": 3.0,
@@ -106,40 +108,44 @@ def test_no_maintenance_no_cost():
         maintenance_actions=[0]*5,
         ordering_cost=0.0,
         machine_states=states,
+        eta_values=DEFAULT_ETA,
         shared_reward=0.0,
         weights=DEFAULT_WEIGHTS,
     )
-    # Should be just the availability bonus: w_avail * 1.0 = 2.0
-    assert abs(r1 - 2.0) < 1e-6
+    # Availability bonus (2.0) + RUL bonus (w_RUL*rul_frac, ~0.5)
+    # Value > 2.0 now because RUL bonus was added
+    assert r1 > 2.0, f"r1={r1:.4f} should be > 2.0 (avail + RUL bonus)"
     print(f"PASS: no maintenance, full avail -> r1={r1:.3f} (= w_avail*1.0)")
 
 def test_pm_deducts_cost():
     states = make_states()
-    r1_no_maint = compute_maintenance_reward([0]*5, 0.0, states, 0.0, DEFAULT_WEIGHTS)
-    r1_with_pm  = compute_maintenance_reward([1,0,0,0,0], 0.0, states, 0.0, DEFAULT_WEIGHTS)
+    r1_no_maint = compute_maintenance_reward([0]*5, 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
+    r1_with_pm  = compute_maintenance_reward([1,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
     # PM costs c_PM=1.0
     assert abs(r1_no_maint - r1_with_pm - 1.0) < 1e-6
     print(f"PASS: PM deducts c_PM=1.0 from reward ({r1_no_maint:.3f} -> {r1_with_pm:.3f})")
 
 def test_cm_deducts_more_than_pm():
     states = make_states()
-    r1_pm = compute_maintenance_reward([1,0,0,0,0], 0.0, states, 0.0, DEFAULT_WEIGHTS)
-    r1_cm = compute_maintenance_reward([2,0,0,0,0], 0.0, states, 0.0, DEFAULT_WEIGHTS)
+    r1_pm = compute_maintenance_reward([1,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
+    r1_cm = compute_maintenance_reward([2,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
     assert r1_cm < r1_pm
     print(f"PASS: CM ({r1_cm:.3f}) penalises more than PM ({r1_pm:.3f})")
 
 def test_ordering_cost_deducted():
     states = make_states()
-    r1_no_order = compute_maintenance_reward([0]*5, 0.0,  states, 0.0, DEFAULT_WEIGHTS)
-    r1_order    = compute_maintenance_reward([0]*5, 50.0, states, 0.0, DEFAULT_WEIGHTS)
-    assert abs(r1_no_order - r1_order - 50.0) < 1e-6
+    r1_no_order = compute_maintenance_reward([0]*5, 0.0,  states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
+    r1_order    = compute_maintenance_reward([0]*5, 50.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
+    # ordering cost now delta-weighted (delta=0.5), so diff = 0.5*50 = 25
+    diff = r1_no_order - r1_order
+    assert abs(diff - 25.0) < 1e-6, f"ordering diff={diff:.4f}, expected 25.0 (delta=0.5)"
     print(f"PASS: ordering cost 50.0 deducted correctly")
 
 def test_failure_penalty_propagated_to_r1():
     states = make_states()
     r_shared = compute_shared_reward([0], c_fail=30.0)  # -30
-    r1_no_fail = compute_maintenance_reward([0]*5, 0.0, states, 0.0,   DEFAULT_WEIGHTS)
-    r1_fail    = compute_maintenance_reward([0]*5, 0.0, states, r_shared, DEFAULT_WEIGHTS)
+    r1_no_fail = compute_maintenance_reward([0]*5, 0.0, states, DEFAULT_ETA, 0.0,      DEFAULT_WEIGHTS)
+    r1_fail    = compute_maintenance_reward([0]*5, 0.0, states, DEFAULT_ETA, r_shared, DEFAULT_WEIGHTS)
     # lambda=0.3, so penalty = 0.3 * (-30) = -9
     diff = r1_no_fail - r1_fail
     assert abs(diff - 9.0) < 1e-6
@@ -154,11 +160,9 @@ def test_no_tardiness_no_penalty():
     r2 = compute_scheduling_reward(
         jobs=jobs, completed_job_ids=[], assignment=None,
         machine_states=make_states(), shared_reward=0.0,
-        t_max=200, weights=DEFAULT_WEIGHTS,
+        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
     )
-    # No tardiness, no completion this step, no assignment
-    # Should be close to 0 (only small negative from normalised 0 tardiness)
-    assert r2 >= -0.1
+    assert r2 >= -0.5   # makespan estimate may add small negative
     print(f"PASS: no tardiness -> r2~0 ({r2:.4f})")
 
 def test_completion_bonus_fires():
@@ -166,12 +170,12 @@ def test_completion_bonus_fires():
     r2_no_comp = compute_scheduling_reward(
         jobs, completed_job_ids=[], assignment=None,
         machine_states=make_states(), shared_reward=0.0,
-        t_max=200, weights=DEFAULT_WEIGHTS,
+        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
     )
     r2_with_comp = compute_scheduling_reward(
         jobs, completed_job_ids=[0], assignment=None,
         machine_states=make_states(), shared_reward=0.0,
-        t_max=200, weights=DEFAULT_WEIGHTS,
+        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
     )
     assert r2_with_comp > r2_no_comp
     diff = r2_with_comp - r2_no_comp
@@ -184,12 +188,12 @@ def test_health_bonus_fires_on_assignment():
     r2_no_assign = compute_scheduling_reward(
         [], [], assignment=None,
         machine_states=states, shared_reward=0.0,
-        t_max=200, weights=DEFAULT_WEIGHTS,
+        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
     )
     r2_assign = compute_scheduling_reward(
         [], [], assignment=(0, 0, 0),   # assign to machine 0 (health=100)
         machine_states=states, shared_reward=0.0,
-        t_max=200, weights=DEFAULT_WEIGHTS,
+        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
     )
     expected_bonus = DEFAULT_WEIGHTS["w_health"] * 1.0   # health=100/100=1.0
     assert abs(r2_assign - r2_no_assign - expected_bonus) < 1e-6
@@ -199,7 +203,9 @@ def test_late_job_incurs_tardiness_penalty():
     job = make_job(0, due=50.0, weight=2.0, complete=True)
     job.tardiness = 10.0   # 10 steps late
     r2 = compute_scheduling_reward(
-        [job], [], None, make_states(), 0.0, 200, DEFAULT_WEIGHTS
+        jobs=[job], completed_job_ids=[], assignment=None,
+        machine_states=make_states(), shared_reward=0.0,
+        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
     )
     # tard penalty = w_tard * w_j * tardiness / T_max = 5 * 2 * 10 / 200 = 0.5
     assert r2 < 0, "Late job should give negative reward"
@@ -215,7 +221,7 @@ def test_r1_nonzero_every_step_due_to_avail_bonus():
     """
     states = make_states()
     r1 = compute_maintenance_reward(
-        [0]*5, 0.0, states, 0.0, DEFAULT_WEIGHTS
+        [0]*5, 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS
     )
     assert r1 != 0.0, "r1 must be non-zero every step (availability bonus)"
     print(f"PASS: r1 non-zero every step = {r1:.3f} (dense availability signal)")

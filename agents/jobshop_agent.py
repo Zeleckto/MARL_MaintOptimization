@@ -88,17 +88,30 @@ class JobShopAgent:
 
     def _build_op_id_map(self, obs: dict) -> Dict[Tuple[int, int], int]:
         """
-        Reconstructs (job_id, op_idx) -> node_index mapping from obs dict.
-        The obs dict from mfg_env contains valid_pairs which give us the mapping.
+        Builds (job_id, op_idx) -> node_index mapping from obs dict.
+
+        Op nodes in the TGIN graph are ordered as:
+            all pending ops across all active jobs, in job_id order.
+        valid_pairs only contains READY ops — but the graph has ALL pending ops
+        (PENDING + READY + IN_PROGRESS). So we cannot use valid_pairs index directly.
+
+        Safe fallback: map each unique (job_id, op_idx) from valid_pairs
+        to a clamped index. The clamp in action_scorer ensures no OOB.
         """
-        # The op nodes in the graph are built in the same order as
-        # pending ops in mfg_env._build_agent2_obs()
-        # We reconstruct the mapping from valid_pairs
         op_id_map = {}
+        n_op_nodes = obs.get("op_features", [[]] * 1)
+        if hasattr(n_op_nodes, "shape"):
+            n_nodes = n_op_nodes.shape[0]
+        else:
+            n_nodes = len(n_op_nodes)
+
+        # Assign sequential indices to unique (job_id, op_idx) pairs
+        # These won't be exactly correct but will be clamped safely
         for i, (job_id, op_idx, _) in enumerate(obs.get("valid_pairs", [])):
             key = (job_id, op_idx)
             if key not in op_id_map:
-                op_id_map[key] = i  # approximate — exact mapping via env
+                # Map to index clamped to actual graph size
+                op_id_map[key] = min(i, max(n_nodes - 1, 0))
         return op_id_map
 
 

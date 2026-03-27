@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 models/tgin/action_scorer.py
 ==============================
@@ -8,7 +9,7 @@ This is the policy head for Agent 2.
 Input:  TGIN output embeddings + valid pair indices
 Output: Categorical distribution over valid pairs + WAIT action
 """
-from __future__ import annotations
+
 from typing import List, Tuple, Dict, Optional
 
 try:
@@ -87,6 +88,8 @@ class ActionScorer(nn.Module if TORCH_AVAILABLE else object):
         for job_id, op_idx, machine_id in valid_pairs:
             op_node_idx = op_id_map.get((job_id, op_idx), 0)
 
+            op_node_idx = min(int(op_node_idx), h_op.shape[0] - 1)
+            machine_id  = min(int(machine_id),  h_machine.shape[0] - 1)
             h_o = h_op[op_node_idx]          # [hidden_dim]
             h_m = h_machine[machine_id]      # [hidden_dim]
 

@@ -1,0 +1,23 @@
+Error processing line 1 of D:\IITD\SEM8\BTP2\Code\v0\manufacturing_marl\venv\Lib\site-packages\distutils-precedence.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  AttributeError: module '_distutils_hack' has no attribute 'add_shim'
+
+Remainder of file ignored
+Error processing line 1 of D:\IITD\SEM8\BTP2\Code\v0\manufacturing_marl\venv\Lib\site-packages\distutils-precedence.pth:
+
+  Traceback (most recent call last):
+    File "<frozen site>", line 206, in addpackage
+    File "<string>", line 1, in <module>
+  AttributeError: module '_distutils_hack' has no attribute 'add_shim'
+
+Remainder of file ignored
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\IITD\SEM8\BTP2\Code\v0\manufacturing_marl\venv\Lib\site-packages\pytest\__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+                     ^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'pytest' has no attribute 'console_main'

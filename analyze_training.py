@@ -162,7 +162,7 @@ def make_figure(data: dict, run_dir: str, smooth_win: int, out_path: str):
         e_mean, l_mean, _, _ = split_early_late(steps, raw)
         change = l_mean - e_mean
         pct    = (change / abs(e_mean) * 100) if abs(e_mean) > 1e-6 else 0.0
-        sign   = "▲" if change > 0 else "▼"
+        sign   = "(+)" if change > 0 else "(-)"
         good   = (change > 0) != invert
         ann_col = GREEN if good else CORAL
 
@@ -315,13 +315,13 @@ def make_early_late_chart(data: dict, out_path: str):
         change = lm - em
         pct    = (change / abs(em) * 100) if abs(em) > 1e-6 else 0.0
         good   = (change > 0) != inverted[i]
-        sign   = "▲" if change > 0 else "▼"
+        sign   = "(+)" if change > 0 else "(-)"
         c      = GREEN if good else CORAL
 
         ax.set_title(titles[i], fontsize=12, fontweight="bold", color=SLATE)
         ax.tick_params(colors=SLATE, labelsize=9)
 
-        ax.text(0.5, 0.97, f"{sign} {abs(pct):.1f}%",
+        ax.text(0.5, 0.97, f"({'up' if change>0 else 'down'}) {abs(pct):.1f}%",
                 transform=ax.transAxes, fontsize=13, fontweight="bold",
                 color=c, ha="center", va="top")
 
@@ -465,7 +465,7 @@ def make_report(data: dict, run_dir: str, out_path: str):
         e_m, l_m, e_s, l_s = split_early_late(steps, vals)
         change = l_m - e_m
         pct    = (change / abs(e_m) * 100) if abs(e_m) > 1e-6 else 0.0
-        sign   = "▲" if change > 0 else "▼"
+        sign   = "(+)" if change > 0 else "(-)"
 
         if lower_better is not None:
             good = (change < 0) if lower_better else (change > 0)
@@ -543,7 +543,7 @@ def make_report(data: dict, run_dir: str, out_path: str):
 
     report_text = "\n".join(lines)
     print(report_text)
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(report_text)
     print(f"\nReport saved: {out_path}")
     return report_text

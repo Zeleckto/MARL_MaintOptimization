@@ -3,8 +3,11 @@ from __future__ import annotations
 agents/jobshop_agent.py
 ========================
 Agent 2 (Job Shop) wrapper.
-Orchestrates: obs -> graph_builder -> TGIN -> action_scorer -> (j,k,m)
-Stores (obs, action, logprob) for rollout buffer.
+
+Key addition: get_log_prob() method used during PPO update to compute
+π_new(a|obs) — the log probability of the stored action under the
+CURRENT (updated) policy weights. This enables proper PPO importance
+sampling ratio: r_t = exp(new_logp - old_logp).
 """
 
 from typing import Tuple, Optional, List, Dict
@@ -22,10 +25,7 @@ from models.tgin.action_scorer import ActionScorer
 
 
 class JobShopAgent:
-    """
-    Agent 2: Job-Machine assignment and operation sequencing.
-    Uses TGIN policy network on tripartite graph representation.
-    """
+    """Agent 2: Job-Machine assignment using TGIN policy."""
 
     def __init__(self, config: dict, device: str = "cpu"):
         self.config = config
@@ -41,82 +41,100 @@ class JobShopAgent:
             self.action_scorer = None
 
 
+    def _forward(self, obs: dict) -> Tuple:
+        """
+        Shared forward pass: obs dict → graph → TGIN → (dist, op_id_map).
+        Used by both act() and get_log_prob() to avoid code duplication.
+
+        Returns:
+            (dist, valid_pairs, op_id_map)
+        """
+        import torch
+
+        valid_pairs = obs.get("valid_pairs", [])
+        graph       = self.graph_builder.build(obs, device=self.device)
+        embeddings  = self.tgin(graph)
+
+        # Build op_id_map — maps (job_id, op_idx) → node index in graph
+        # Op nodes are ordered as all pending ops in job_id order
+        # We approximate by clamping to graph size (exact fix in Phase 2)
+        n_op_nodes = embeddings["op"].shape[0]
+        op_id_map  = {}
+        for i, (job_id, op_idx, _) in enumerate(valid_pairs):
+            key = (job_id, op_idx)
+            if key not in op_id_map:
+                op_id_map[key] = min(i, n_op_nodes - 1)
+
+        dist, logits = self.action_scorer(embeddings, valid_pairs, op_id_map)
+        return dist, valid_pairs, op_id_map
+
+
     def act(
         self,
-        obs:         dict,   # Agent 2 obs dict from mfg_env._build_agent2_obs()
+        obs:         dict,
         valid_pairs: List[Tuple[int, int, int]],
     ) -> Tuple[Optional[Tuple[int, int, int]], int, float, float]:
         """
-        Selects Agent 2's scheduling action.
-
-        Args:
-            obs:         Graph observation dict
-            valid_pairs: Valid (job_id, op_idx, machine_id) tuples
+        Selects action. Called during rollout collection.
 
         Returns:
             (semantic_action, action_idx, log_prob, entropy)
-            semantic_action: (job_id, op_idx, machine_id) or None (WAIT)
-            action_idx:      Index sampled (last idx = WAIT)
         """
         if not TORCH_AVAILABLE:
             return None, len(valid_pairs), 0.0, 0.0
 
         import torch
 
-        # Build graph
-        graph = self.graph_builder.build(obs, device=self.device)
-
-        # Build op_id_map: (job_id, op_idx) -> node index
-        op_id_map = self._build_op_id_map(obs)
-
-        # TGIN forward pass
         with torch.no_grad():
-            embeddings = self.tgin(graph)
-            dist, logits = self.action_scorer(embeddings, valid_pairs, op_id_map)
-            action_idx = dist.sample().item()
-            log_prob   = dist.log_prob(torch.tensor(action_idx, device=self.device)).item()
-            entropy    = dist.entropy().item()
+            dist, vp, _ = self._forward(obs)
+            action_idx  = dist.sample().item()
+            log_prob    = dist.log_prob(
+                torch.tensor(action_idx, device=self.device)
+            ).item()
+            entropy = dist.entropy().item()
 
-        # Decode action
-        if action_idx < len(valid_pairs):
-            semantic_action = valid_pairs[action_idx]
-        else:
-            semantic_action = None  # WAIT
-
-        return semantic_action, action_idx, log_prob, entropy
+        semantic = vp[action_idx] if action_idx < len(vp) else None
+        return semantic, action_idx, log_prob, entropy
 
 
-    def _build_op_id_map(self, obs: dict) -> Dict[Tuple[int, int], int]:
+    def get_log_prob(
+        self,
+        obs:        dict,
+        action_idx: int,
+    ) -> Tuple["torch.Tensor", "torch.Tensor"]:
         """
-        Builds (job_id, op_idx) -> node_index mapping from obs dict.
+        Computes log prob and entropy for a stored action under CURRENT weights.
 
-        Op nodes in the TGIN graph are ordered as:
-            all pending ops across all active jobs, in job_id order.
-        valid_pairs only contains READY ops — but the graph has ALL pending ops
-        (PENDING + READY + IN_PROGRESS). So we cannot use valid_pairs index directly.
+        This IS differentiable — the forward pass through self.tgin and
+        self.action_scorer creates a live computation graph so .backward()
+        will update TGIN weights.
 
-        Safe fallback: map each unique (job_id, op_idx) from valid_pairs
-        to a clamped index. The clamp in action_scorer ensures no OOB.
+        Called during PPO update (not during rollout — no torch.no_grad() here).
+
+        Args:
+            obs:        Stored obs dict from rollout buffer
+            action_idx: The action that was taken (stored in buffer)
+
+        Returns:
+            (log_prob_tensor, entropy_tensor) — both with gradient
         """
-        op_id_map = {}
-        n_op_nodes = obs.get("op_features", [[]] * 1)
-        if hasattr(n_op_nodes, "shape"):
-            n_nodes = n_op_nodes.shape[0]
-        else:
-            n_nodes = len(n_op_nodes)
+        import torch
 
-        # Assign sequential indices to unique (job_id, op_idx) pairs
-        # These won't be exactly correct but will be clamped safely
-        for i, (job_id, op_idx, _) in enumerate(obs.get("valid_pairs", [])):
-            key = (job_id, op_idx)
-            if key not in op_id_map:
-                # Map to index clamped to actual graph size
-                op_id_map[key] = min(i, max(n_nodes - 1, 0))
-        return op_id_map
+        dist, vp, _ = self._forward(obs)
+
+        # Clamp action_idx to valid distribution size
+        n_actions   = len(vp) + 1   # valid pairs + WAIT
+        action_idx  = min(int(action_idx), n_actions - 1)
+        action_t    = torch.tensor(action_idx, device=self.device)
+
+        log_prob = dist.log_prob(action_t)    # has gradient ✓
+        entropy  = dist.entropy()             # has gradient ✓
+
+        return log_prob, entropy
 
 
     def parameters(self):
-        """Returns all trainable parameters for optimizer."""
         if self.tgin and self.action_scorer:
-            return list(self.tgin.parameters()) + list(self.action_scorer.parameters())
+            return list(self.tgin.parameters()) + \
+                   list(self.action_scorer.parameters())
         return []

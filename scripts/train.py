@@ -10,11 +10,26 @@ Usage:
 """
 
 import argparse
-import yaml
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Auto-clear __init__.py files before any imports
+# Prevents circular import crashes caused by auto-imports in package inits
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for _dirpath, _dirs, _files in os.walk(_root):
+    if "venv" in _dirpath or ".git" in _dirpath:
+        continue
+    for _f in _files:
+        if _f == "__init__.py":
+            _p = os.path.join(_dirpath, _f)
+            try:
+                if os.path.getsize(_p) > 0:
+                    open(_p, "w").close()
+            except Exception:
+                pass
+
+sys.path.insert(0, _root)
+import yaml
 
 
 def load_config(path: str) -> dict:

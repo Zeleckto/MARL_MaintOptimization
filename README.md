@@ -345,6 +345,86 @@ In `jobshop_agent.py`, the mapping from `(job_id, op_idx)` to TGIN node index is
 
 ---
 
+---
+
+## Training Progress — Phase 1 Results
+
+> **Status as of March 2026:** Phase 1 training completed — 367,000 steps, 5,000+ episodes on RTX 3060 12GB.
+
+### What We Achieved
+
+| Metric | Early Training | Late Training | Direction |
+|---|---|---|---|
+| Machine Failures/Episode | 0.003 | 0.000 | 33% fewer — Agent 1 learning PM |
+| Jobs Completed/Episode | 20.0 | 20.0 | Stable — 100% throughput |
+| Avg Machine Health | 87.5% | 87.5% | Stable — proactive maintenance working |
+| Weighted Tardiness | 194.8 | 187.6 | 3.7% reduction |
+| Agent 2 Episode Return | +248 | +308 | 24% improvement — scheduling getting better |
+| Episode Length | ~1500 steps | ~1000 steps | 33% faster — jobs completing quicker |
+
+**Key finding:** Zero machine failures sustained from episode ~3,500 onwards. All 20 jobs complete every episode. Agent 1 (PDM) converged effectively to a proactive maintenance policy. Agent 2 (Job Shop) shows 24% return improvement even before proper PPO gradient updates were enabled — the health-aware dispatch signal and dense completion bonus were sufficient to improve scheduling without TGIN weight updates.
+
+### Training Problems Encountered and Fixed
+
+#### 1. PettingZoo AEC Ordering Conflict
+`env.step()` called manually outside `agent_iter()` caused agent ordering conflicts — Agent 2 could be assigned to a machine Agent 1 had just sent to maintenance in the same timestep. **Fix:** Call `env._step_agent1()`, `env._step_agent2()`, `env._resolve_physics()`, `env._compute_rewards()` directly, bypassing the AEC selector entirely.
+
+#### 2. Agent 2 PPO backward() Crash
+`old_lp2` stored during rollout collection is a plain numpy array converted to tensor — no computation graph attached. Calling `.backward()` on a loss involving it fails with no gradient path error. **Fix:** Added `jobshop_agent.get_log_prob(obs_dict, action_idx)` which runs a fresh TGIN forward pass on the stored observation dict, creating a live computation graph through current TGIN weights. The returned log prob IS differentiable. PPO ratio now correctly computed as `exp(new_lp2 - old_lp2)`. Each minibatch sample requires one TGIN forward pass (cannot be batched due to variable graph sizes).
+
+#### 3. Device Mismatch (CPU vs CUDA)
+During PPO update, tensors created from stored numpy arrays defaulted to CPU while model weights were on `cuda:0`. Caused `RuntimeError: Expected all tensors to be on the same device`. All `torch.tensor()` calls in `ppo_update.py` now explicitly `.to(device)` where device is inferred from `next(model.parameters()).device`.
+
+#### 4. venv Corruption on Python 3.13 + Windows
+`distutils-precedence.pth` in site-packages calls `_distutils_hack.add_shim()` which was removed in Python 3.13. This fires on every Python startup and leaves packages in a half-initialised state — `yaml`, `numpy`, `torch` all appear to import but lose their attributes (`safe_load`, `ndarray`, `cuda`). Rebuilding the venv does not permanently fix it since `pip install` recreates the file. **Fix:** `start.sh` truncates this file to zero bytes every session before any imports.
+
+#### 5. __init__.py Auto-Imports Causing Circular Imports
+Non-empty `__init__.py` files trigger circular import chains during Python startup, corrupting package initialisation before packages finish loading. All `__init__.py` files must be empty — they are package markers only, not import aggregators. `start.sh` clears these automatically every session.
+
+#### 6. Action Index Out of Bounds in TGIN
+TGIN graph contains ALL pending operations (PENDING + READY + IN_PROGRESS). `valid_pairs` contains only READY operations. The `op_id_map` was using valid_pairs indices as TGIN node indices — goes out of bounds when graph has more op nodes than valid pairs. **Fix:** Index clamped to `min(idx, n_op_nodes - 1)` in `action_scorer.py`.
+
+---
+
+## Every-Session Startup
+
+Due to Python 3.13 + Windows venv issues, run this **every time** before anything else:
+
+```bash
+source start.sh
+```
+
+This script (in project root) automatically:
+1. Activates venv if not already active
+2. Truncates `distutils-precedence.pth` — the root cause of all package corruption
+3. Clears all `__init__.py` files — prevents circular import cascade
+4. Verifies yaml, numpy, torch, pygame all load correctly
+5. Prints all common training and evaluation commands
+
+Without `start.sh`, yaml/numpy/torch will appear to import but silently lose attributes, causing cryptic `AttributeError: module 'yaml' has no attribute 'safe_load'` errors throughout.
+
+---
+
+## Upcoming Steps
+
+### Immediate
+- Resume Phase 1 for remaining 133k steps: `bash train.sh --timesteps 133000 --resume checkpoints/latest.pt`
+- Run baseline comparison: `python benchmarks/run_benchmarks.py --checkpoint checkpoints/latest.pt`
+- Verify Agent 2 PPO updating — watch `train/actor2_loss` in TensorBoard (should now appear and decrease)
+
+### Weeks 2-3
+- Phase 2 training — add LogNormal processing times + Beta repair effectiveness; resume from Phase 1 checkpoint
+- Implement proper critic update — store global state in rollout buffer, run critic forward in PPO epochs
+- Reward normalisation — clip rewards to [-1,1] per step to reduce advantage noise (currently oscillates -12 to +5)
+- Tier 1 CP-SAT for M=3, J=5 — ground-truth optimal comparison for small instances
+
+### Paper
+- Phase 3 training — Poisson arrivals + full stochasticity
+- Comparison table: MARL vs Random vs Rule-Based (EDF) vs Fixed-Interval PM vs Tier 1 (small)
+- Ablation: joint optimisation vs separate maintenance+scheduling policies
+- Target venue: Reliability Engineering & System Safety or IISE Transactions
+
+
 <div align="center">
 
 *Indian Institute of Technology Delhi — Mechanical Engineering*
@@ -352,3 +432,14 @@ In `jobshop_agent.py`, the mapping from `(job_id, op_idx)` to TGIN node index is
 *BTP2 (MCD412) — February–May 2026*
 
 </div>
+
+</div>
+
+
+## 📊 Training Results
+
+<p align="center">
+  <img src="Results/early_late_comparison.png" width="30%" />
+  <img src="Results/maintenance_analysis.png" width="30%" />
+  <img src="Results/training_analysis.png" width="30%" />
+</p>

@@ -33,7 +33,7 @@ def compute_rul_bonus(
 ) -> float:
     """
     Mean normalised RUL across operational machines.
-    Returns value in [0, 1].
+    Returns value in [0, 1]. Gracefully handles missing rul attribute (v1).
 
     Only counts OP machines — machines in PM/CM have no RUL risk right now.
     If RUL < rul_threshold * eta, that machine contributes 0 (already degraded).
@@ -46,7 +46,17 @@ def compute_rul_bonus(
     for s, eta in zip(machine_states, eta_values):
         if s.status != MachineStatus.OP:
             continue
-        frac = s.rul / max(eta, 1.0)
+        rul = getattr(s, "rul", None)
+        if rul is None:
+            # rul removed in v1: use hazard_rate as proxy, or skip
+            hr = getattr(s, "hazard_rate", None)
+            if hr is not None:
+                peak_hr = s.beta / max(eta, 1.0)
+                frac = max(0.0, 1.0 - hr / max(peak_hr, 1e-12))
+            else:
+                continue  # nothing to compute
+        else:
+            frac = rul / max(eta, 1.0)
         if frac >= rul_threshold:
             rul_fracs.append(min(frac, 1.0))
         else:

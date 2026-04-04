@@ -3,32 +3,38 @@ from __future__ import annotations
 rewards/reward_fn.py
 =====================
 Orchestrator: assembles r1, r2, R_shared from all components.
-Called once per full timestep from mfg_env._compute_rewards().
 
-Changes:
-  - Criticality-weighted R_shared (bottleneck failures cost more)
-  - RUL preservation bonus in r1
-  - Makespan estimate penalty in r2
-  - delta_obj weighting on resource ordering cost
-  - Passes eta_values to maintenance_reward for RUL normalisation
+Uses inspect.signature to probe each component function at init time,
+so this file works with any v0 or v1 version of the components.
+If a parameter was removed from a component, we simply don't pass it.
 """
 
 import os
+import inspect
 import yaml
 from typing import List, Tuple, Optional, Dict
 
+import numpy as np
+
 from environments.transitions.degradation import MachineState
 from environments.transitions.job_dynamics import Job
-from rewards.components.shared_reward import (
-    compute_shared_reward, compute_machine_criticality
-)
+
 from rewards.components.maintenance_reward import compute_maintenance_reward
 from rewards.components.scheduling_reward import compute_scheduling_reward
+
+# --- shared_reward: safe conditional imports ---
+from rewards.components.shared_reward import compute_shared_reward
+try:
+    from rewards.components.shared_reward import compute_machine_criticality
+except ImportError:
+    def compute_machine_criticality(newly_failed, eligible_map, n_pending_ops):
+        return {m: 0.0 for m in newly_failed}
 
 
 class RewardFunction:
     """
     Centralised reward computation for both agents.
+    Probes component function signatures at init so calls are always compatible.
 
     Usage:
         rf = RewardFunction(config)
@@ -36,22 +42,95 @@ class RewardFunction:
     """
 
     def __init__(self, config: dict):
-        weights_path = os.path.join(
-            os.path.dirname(__file__), "reward_weights.yaml"
-        )
+        weights_path = os.path.join(os.path.dirname(__file__), "reward_weights.yaml")
         if os.path.exists(weights_path):
             with open(weights_path) as f:
                 self.weights = yaml.safe_load(f)
         else:
             self.weights = config.get("reward", {})
 
-        # Extract eta values per machine for RUL normalisation
         self.eta_values = [
-            m.get("eta", 3000.0)
-            for m in config.get("machines", [])
+            m.get("eta", 3000.0) for m in config.get("machines", [])
         ]
+        self.t_max = config.get("episode", {}).get("t_max_train", 150)
 
-        self.t_max = config.get("episode", {}).get("t_max_train", 200)
+        # Probe component function signatures once at init.
+        # Store sets of accepted param names for each function.
+        self._shared_params  = set(inspect.signature(compute_shared_reward).parameters)
+        self._maint_params   = set(inspect.signature(compute_maintenance_reward).parameters)
+        self._sched_params   = set(inspect.signature(compute_scheduling_reward).parameters)
+
+
+    def _call_shared(
+        self,
+        newly_failed:        List[int],
+        machine_criticality: Dict[int, float],
+    ) -> float:
+        """Calls compute_shared_reward with only the params it accepts."""
+        kwargs = {
+            "newly_failed_machine_ids": newly_failed,
+            "c_fail": self.weights.get("c_fail", 25.0),
+        }
+        if "criticality_multiplier" in self._shared_params:
+            kwargs["criticality_multiplier"] = self.weights.get(
+                "criticality_multiplier", 5.0)
+        if "machine_criticality" in self._shared_params:
+            kwargs["machine_criticality"] = machine_criticality
+        return compute_shared_reward(**kwargs)
+
+
+    def _call_maintenance(
+        self,
+        maintenance_actions: List[int],
+        ordering_cost:       float,
+        machine_states:      List[MachineState],
+        shared_reward:       float,
+        inventory_total:     float,
+    ) -> float:
+        """Calls compute_maintenance_reward with only the params it accepts."""
+        kwargs = {
+            "maintenance_actions": maintenance_actions,
+            "ordering_cost":       ordering_cost,
+            "machine_states":      machine_states,
+            "shared_reward":       shared_reward,
+            "weights":             self.weights,
+        }
+        if "eta_values" in self._maint_params:
+            kwargs["eta_values"] = self.eta_values
+        if "inventory_total" in self._maint_params:
+            kwargs["inventory_total"] = inventory_total
+        return compute_maintenance_reward(**kwargs)
+
+
+    def _call_scheduling(
+        self,
+        jobs:             List[Job],
+        completed_ids:    List[int],
+        assignment,
+        machine_states:   List[MachineState],
+        shared_reward:    float,
+        current_step:     int,
+    ) -> float:
+        """Calls compute_scheduling_reward with only the params it accepts.
+        Handles both current_step (zip) and current_time (v1) naming.
+        """
+        kwargs = {
+            "jobs":              jobs,
+            "completed_job_ids": completed_ids,
+            "assignment":        assignment,
+            "shared_reward":     shared_reward,
+            "weights":           self.weights,
+        }
+        if "machine_states" in self._sched_params:
+            kwargs["machine_states"] = machine_states
+        if "t_max" in self._sched_params:
+            kwargs["t_max"] = self.t_max
+        # Handle both naming conventions for current time
+        if "current_step" in self._sched_params:
+            kwargs["current_step"] = current_step
+        elif "current_time" in self._sched_params:
+            kwargs["current_time"] = current_step
+        return compute_scheduling_reward(**kwargs)
 
 
     def compute(
@@ -68,58 +147,23 @@ class RewardFunction:
         n_pending_ops:            int = 0,
         inventory_total:          float = 0.0,
     ) -> Tuple[float, float, float]:
-        """
-        Computes all reward components for one timestep.
+        """Computes r1, r2, R_shared for one timestep."""
 
-        Args:
-            maintenance_actions:      Agent 1 maintenance actions [n_machines]
-            ordering_cost:            Raw resource ordering cost (before δ)
-            machine_states:           Post-tick machine states
-            newly_failed_machine_ids: Machines that failed this step
-            jobs:                     All jobs
-            completed_job_ids:        Jobs completed this step
-            assignment:               Agent 2 action (j,k,m) or None
-            current_step:             Current timestep (for makespan estimate)
-            eligible_map:             {machine_id: [ops]} for criticality
-            n_pending_ops:            Total pending ops (for criticality)
-
-        Returns:
-            (r1, r2, r_shared)
-        """
-        # Criticality-weighted shared failure penalty
+        # Criticality weighting for shared penalty
         machine_criticality = compute_machine_criticality(
             newly_failed_machine_ids,
             eligible_map or {},
             n_pending_ops,
         )
-        r_shared = compute_shared_reward(
-            newly_failed_machine_ids,
-            c_fail                 = self.weights.get("c_fail", 30.0),
-            criticality_multiplier = self.weights.get("criticality_multiplier", 5.0),
-            machine_criticality    = machine_criticality,
-        )
 
-        # Agent 1 reward (with RUL bonus and ordering cost)
-        r1 = compute_maintenance_reward(
-            maintenance_actions = maintenance_actions,
-            ordering_cost       = ordering_cost,
-            machine_states      = machine_states,
-            eta_values          = self.eta_values,
-            shared_reward       = r_shared,
-            weights             = self.weights,
-            inventory_total     = inventory_total,
+        r_shared = self._call_shared(newly_failed_machine_ids, machine_criticality)
+        r1 = self._call_maintenance(
+            maintenance_actions, ordering_cost, machine_states,
+            r_shared, inventory_total,
         )
-
-        # Agent 2 reward (with makespan estimate)
-        r2 = compute_scheduling_reward(
-            jobs              = jobs,
-            completed_job_ids = completed_job_ids,
-            assignment        = assignment,
-            machine_states    = machine_states,
-            shared_reward     = r_shared,
-            t_max             = self.t_max,
-            current_step      = current_step,
-            weights           = self.weights,
+        r2 = self._call_scheduling(
+            jobs, completed_job_ids, assignment,
+            machine_states, r_shared, current_step,
         )
 
         return r1, r2, r_shared

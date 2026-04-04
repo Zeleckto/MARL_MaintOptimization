@@ -165,30 +165,39 @@ def test_multiple_repairs_accumulate_correctly():
 
 
 def test_cm_restores_more_health_than_pm():
-    """CM should restore more health than PM (h_restore_CM > h_restore_PM)."""
-    engine = make_engine(q_fixed=0.5)
-    rng = np.random.default_rng(42)
+    """CM restores more health than PM because it has lower q (less residual age).
 
-    # PM test
+    With Weibull health H = 100*exp(-(effective_age/eta)^beta):
+    - After repair: effective_age = virtual_age = old_virtual_age + q * time_since_maint
+    - Lower q -> smaller virtual_age -> higher health
+    - CM (thorough repair) uses lower q than PM (partial repair).
+    """
+    rng = np.random.default_rng(42)
+    OPERATING_TIME = 600.0  # hours accumulated since last repair
+
+    # PM: q=0.5 (partial repair retains 50% of accumulated age)
+    engine_pm = make_engine(q_fixed=0.5)
     m_pm = build_machine_states([MACHINE_CFG])[0]
-    m_pm.health = 40.0
+    m_pm.time_since_maint = OPERATING_TIME
     m_pm.status = MachineStatus.PM
     m_pm.maint_steps_remaining = 1
-    m_pm = engine.tick(m_pm, False, rng, 0)
+    m_pm = engine_pm.tick(m_pm, False, rng, 0)
     health_after_pm = m_pm.health
 
-    # CM test
+    # CM: q=0.1 (thorough repair retains only 10% of accumulated age)
+    engine_cm = make_engine(q_fixed=0.1)
     m_cm = build_machine_states([MACHINE_CFG])[0]
-    m_cm.health = 40.0
+    m_cm.time_since_maint = OPERATING_TIME
     m_cm.status = MachineStatus.CM
     m_cm.maint_steps_remaining = 1
-    m_cm = engine.tick(m_cm, False, rng, 0)
+    m_cm = engine_cm.tick(m_cm, False, rng, 0)
     health_after_cm = m_cm.health
 
     assert health_after_cm > health_after_pm, (
-        f"CM ({health_after_cm:.1f}) should restore more health than PM ({health_after_pm:.1f})"
+        f"CM (q=0.1) should restore more health than PM (q=0.5): "
+        f"CM={health_after_cm:.1f}% PM={health_after_pm:.1f}%"
     )
-    print(f"PASS: CM restores {health_after_cm:.1f} health, PM restores {health_after_pm:.1f}")
+    print(f"PASS: CM restores to {health_after_cm:.1f}%, PM restores to {health_after_pm:.1f}%")
 
 
 def test_effective_age_used_for_hazard_not_virtual_age():

@@ -394,8 +394,10 @@ def main():
     parser.add_argument("--config",     default="configs/base.yaml")
     parser.add_argument("--jobs",       type=int, default=None)
     parser.add_argument("--outdir",     default="results/")
-    parser.add_argument("--no-excel",   action="store_true")
-    parser.add_argument("--no-plots",   action="store_true")
+    parser.add_argument("--no-excel",    action="store_true")
+    parser.add_argument("--no-plots",    action="store_true")
+    parser.add_argument("--checkpoint",  default=None,
+                        help="MARL checkpoint to include in comparison")
     args = parser.parse_args()
 
     print("\nLoading config...")

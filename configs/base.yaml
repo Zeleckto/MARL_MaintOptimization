@@ -185,7 +185,7 @@ mappo:
   value_loss_coef: 0.5
   max_grad_norm: 0.5
   rollout_steps: 2048
-  ppo_epochs: 10
+  ppo_epochs: 5
   minibatch_size: 64
 
 # --- TGIN Architecture -----------------------------------------------------
@@ -222,7 +222,7 @@ jobs:
   n_ops_per_job_min: 2
   n_ops_per_job_max: 6          # mean Y_avg = (2+6)/2 = 4
   proc_time_min_hours: 16.0     # 2 shifts  (light machining)
-  proc_time_max_hours: 56.0     # 7 shifts  (heavy precision) — mean 4.5 shifts
+  proc_time_max_hours: 72.0     # 9 shifts  (heavy precision) — mean 4.5 shifts
   lambda_arr: 0.5               # Phase 3 only: Poisson arrival rate (jobs/shift)
   op_type_compatibility:
     0: [0, 1, 2]

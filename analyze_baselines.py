@@ -391,28 +391,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes",   type=int, default=10)
     parser.add_argument("--seed",       type=int, default=42)
-    parser.add_argument("--config",     default="configs/base.yaml")
     parser.add_argument("--jobs",       type=int, default=None)
     parser.add_argument("--outdir",     default="results/")
-    parser.add_argument("--no-excel",    action="store_true")
-    parser.add_argument("--no-plots",    action="store_true")
-    parser.add_argument("--checkpoint",  default=None,
-                        help="MARL checkpoint to include in comparison")
+    parser.add_argument("--no-excel",     action="store_true")
+    parser.add_argument("--no-plots",     action="store_true")
+    parser.add_argument("--stoch-level",  type=int, default=None,
+                        help="Override stochasticity_level (1/2/3 for phase 1/2/3)")
+    parser.add_argument("--checkpoint",   default=None,
+                        help="Optional MARL checkpoint to include in comparison")
     args = parser.parse_args()
 
     print("\nLoading config...")
-    with open("configs/base.yaml") as f:
+    with open("configs/base.yaml", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    if args.config != "configs/base.yaml":
-        with open(args.config) as f:
-            override = yaml.safe_load(f)
-        if override:
-            config.update(override)
+    if args.stoch_level is not None:
+        config["stochasticity_level"] = args.stoch_level
+        print(f"Stochasticity level overridden to {args.stoch_level}")
 
-    print(f"Stochasticity level: {config.get('stochasticity_level', 1)}")
-        
-# Override number of parallel jobs if specified (for ABR+MDD+(Q,R) baseline)    
     if args.jobs:
         config["jobs"]["n_jobs_train"] = args.jobs
 

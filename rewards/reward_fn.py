@@ -86,6 +86,7 @@ class RewardFunction:
         machine_states:      List[MachineState],
         shared_reward:       float,
         inventory_total:     float,
+        delta_ruls:          Optional[List[float]] = None,
     ) -> float:
         """Calls compute_maintenance_reward with only the params it accepts."""
         kwargs = {
@@ -99,6 +100,8 @@ class RewardFunction:
             kwargs["eta_values"] = self.eta_values
         if "inventory_total" in self._maint_params:
             kwargs["inventory_total"] = inventory_total
+        if "delta_ruls" in self._maint_params and delta_ruls is not None:
+            kwargs["delta_ruls"] = delta_ruls
         return compute_maintenance_reward(**kwargs)
 
 
@@ -110,6 +113,7 @@ class RewardFunction:
         machine_states:   List[MachineState],
         shared_reward:    float,
         current_step:     int,
+        t_max:            int = 150,
     ) -> float:
         """Calls compute_scheduling_reward with only the params it accepts.
         Handles both current_step (zip) and current_time (v1) naming.
@@ -146,6 +150,7 @@ class RewardFunction:
         eligible_map:             Optional[Dict[int, List[int]]] = None,
         n_pending_ops:            int = 0,
         inventory_total:          float = 0.0,
+        delta_ruls:               Optional[List[float]] = None,
     ) -> Tuple[float, float, float]:
         """Computes r1, r2, R_shared for one timestep."""
 
@@ -159,11 +164,12 @@ class RewardFunction:
         r_shared = self._call_shared(newly_failed_machine_ids, machine_criticality)
         r1 = self._call_maintenance(
             maintenance_actions, ordering_cost, machine_states,
-            r_shared, inventory_total,
+            r_shared, inventory_total, delta_ruls=delta_ruls,
         )
         r2 = self._call_scheduling(
             jobs, completed_job_ids, assignment,
             machine_states, r_shared, current_step,
+            t_max=self.t_max,
         )
 
         return r1, r2, r_shared

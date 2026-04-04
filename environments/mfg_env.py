@@ -181,6 +181,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self._episode_failures    = 0
         self._episode_completions = 0
         self._episode_pm          = 0
+        self._delta_ruls          = [0.0] * len(self.machine_states)
         self._episode_cm          = 0
 
 
@@ -359,8 +360,9 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         Full physics resolution after both agents have acted.
         Called at end of complete timestep (after Agent 2 half-step).
         """
-        # Save old states for failure detection
+        # Save old states for failure detection AND ΔRUL computation (design doc §6.2)
         old_machine_states = copy.deepcopy(self.machine_states)
+        _prev_ruls = [s.rul for s in self.machine_states]  # RUL before physics
 
         # 1. Weibull degradation + maintenance state transitions
         self.machine_states = self.degradation_engine.tick_all(
@@ -369,6 +371,13 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             rng=self._rng,
             actions_maintenance=self._pending_maintenance.tolist(),
         )
+
+        # Compute ΔRUL fleet signal (design doc §6.2): RUL_after - RUL_before per machine
+        # Positive when PM done (extends RUL), -1/step when operating, large neg on failure
+        self._delta_ruls = [
+            s.rul - prev_r
+            for s, prev_r in zip(self.machine_states, _prev_ruls)
+        ]
 
         # 2. Job processing time decrements + completion detection
         self.jobs, completed_ids, freed_machines = self.job_engine.tick(
@@ -459,6 +468,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             n_pending_ops            = n_pending,
             inventory_total          = float(
                 self.resource_state.consumable_inventory.sum()),
+            delta_ruls               = getattr(self, "_delta_ruls", None),
         )
         self.rewards[AGENT_PDM]     = r1
         self.rewards[AGENT_JOBSHOP] = r2

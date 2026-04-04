@@ -36,9 +36,10 @@ w_hold: 0.005
 
 # --- Agent 2 (Job Shop) weights --------------------------------------------
 alpha: 1.0                     # tardiness weight (eq. 3.14 alpha)
-w_tard: 5                    # normalised tardiness penalty scale
+w_tard: 1.0                    # normalised tardiness penalty (reduced from 5→1: r1/r2 balance)
 w_comp: 3.0                    # job completion bonus per job finished this step
 w_health: 0.5                  # health-aware dispatch bonus per assignment
+w_slack: 0.1                   # slack signal: n_jobs_on_track/J per step (design doc §6.5)
 beta_makespan: 0.2             # running makespan estimate penalty (eq. 3.14 beta)
 
 # --- Objective scalarisation (paper reporting, eq. 3.14) ------------------

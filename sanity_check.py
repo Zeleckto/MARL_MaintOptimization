@@ -38,7 +38,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--config", default="configs/phase1.yaml")
 args = parser.parse_args()
 
-with open(os.path.join(ROOT, "configs", "base.yaml")) as f:
+with open(os.path.join(ROOT, "configs", "base.yaml"), encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 with open(os.path.join(ROOT, args.config)) as f:
     override = yaml.safe_load(f)

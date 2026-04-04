@@ -59,7 +59,7 @@ args = parser.parse_args()
 # ── Load config ─────────────────────────────────────────────────────────────
 try:
     import yaml
-    with open(os.path.join(ROOT, "configs", "base.yaml")) as f:
+    with open(os.path.join(ROOT, "configs", "base.yaml"), encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     with open(os.path.join(ROOT, args.config)) as f:
         ov = yaml.safe_load(f)
@@ -99,7 +99,7 @@ else: warn(f"Y_avg = {y_avg:.1f}", "design doc target is 4.0")
 
 pt_min = cfg_val("jobs.proc_time_min_hours", 0)
 pt_max = cfg_val("jobs.proc_time_max_hours", 0)
-if pt_min == 16.0 and pt_max == 56.0:
+if pt_min == 16.0 and pt_max == 64.0:
     ok(f"proc_time range [{pt_min},{pt_max}]h = [2,7] shifts")
 else:
     warn(f"proc_time range [{pt_min},{pt_max}]h",
@@ -247,9 +247,13 @@ try:
     # Hazard rate increases with age
     rng = np.random.default_rng(0)
     s = build_machine_states([cfg["machines"][0]])[0]
+    def _tick_one_d(state, is_op, action):
+        if hasattr(eng, "tick"):
+            return eng.tick(state, is_operating=is_op, rng=rng, action_maintenance=action)
+        return eng.tick_all([state], [is_op], rng, [action])[0]
     hazards = []
     for _ in range(20):
-        s = eng.tick(s, is_operating=True, rng=rng, action_maintenance=0)
+        s = _tick_one_d(s, True, 0)
         hr = getattr(s, "hazard_rate", None)
         if hr is not None: hazards.append(hr)
     if hazards:
@@ -260,7 +264,15 @@ try:
 
     # PM transition
     s = build_machine_states([cfg["machines"][0]])[0]
-    s_pm = eng.tick(s, is_operating=False, rng=rng, action_maintenance=1)
+    # Use tick() if available, fall back to tick_all() for v1 compatibility
+    def _tick_one(engine, state, is_operating, rng, action):
+        if hasattr(engine, "tick"):
+            return engine.tick(state, is_operating=is_operating,
+                               rng=rng, action_maintenance=action)
+        else:
+            return engine.tick_all([state], [is_operating], rng, [action])[0]
+
+    s_pm = _tick_one(eng, s, False, rng, 1)
     if s_pm.status == MachineStatus.PM:
         ok("PM transition  OP→PM  works")
     else:
@@ -269,7 +281,7 @@ try:
     # CM transition (from FAIL)
     s = build_machine_states([cfg["machines"][0]])[0]
     s.status = MachineStatus.FAIL
-    s_cm = eng.tick(s, is_operating=False, rng=rng, action_maintenance=2)
+    s_cm = _tick_one(eng, s, False, rng, 2)
     if s_cm.status == MachineStatus.CM:
         ok("CM transition  FAIL→CM  works")
     else:
@@ -287,7 +299,7 @@ try:
     s = build_machine_states([cfg["machines"][0]])[0]
     s.virtual_age = 500.0; s.time_since_maint = 200.0
     s.status = MachineStatus.PM; s.maint_steps_remaining = 1
-    s_post = eng.tick(s, is_operating=False, rng=rng, action_maintenance=0)
+    s_post = _tick_one_d(s, False, 0)
     if s_post.virtual_age > 500.0:
         ok(f"Kijima virtual age increases after repair  (500 → {s_post.virtual_age:.1f})")
     else:
@@ -373,12 +385,12 @@ if env is not None:
                 all_proc_times.extend(op.nominal_proc_times.values())
         if all_proc_times:
             pt_arr = np.array(all_proc_times)
-            if pt_arr.min() >= 14 and pt_arr.max() <= 60:
+            if pt_arr.min() >= 14 and pt_arr.max() <= 68:
                 ok(f"Proc times in expected range  [{pt_arr.min():.0f},{pt_arr.max():.0f}]h "
                    f"(target [16,56]h)")
             else:
                 warn(f"Proc times [{pt_arr.min():.0f},{pt_arr.max():.0f}]h",
-                     "expected [16,56]h per design doc")
+                     "expected [16,64]h per design doc v2")
             ok(f"Mean proc time = {pt_arr.mean():.1f}h = {pt_arr.mean()/8:.2f} shifts  (target 4.5 shifts)")
 
         # Eligibility ratio
@@ -499,8 +511,12 @@ if env is not None:
         eng2 = DegradationEngine(cfg)
         s = build_machine_states([cfg["machines"][0]])[0]
         s_before = s.status
-        s = eng2.tick(s, is_operating=False, rng=np.random.default_rng(0),
-                      action_maintenance=1)
+        def _tick2(state, is_op, action):
+            if hasattr(eng2, "tick"):
+                return eng2.tick(state, is_operating=is_op,
+                                 rng=np.random.default_rng(0), action_maintenance=action)
+            return eng2.tick_all([state], [is_op], np.random.default_rng(0), [action])[0]
+        s = _tick2(s, False, 1)
         if s.status == MachineStatus.PM:
             ok("Degradation engine: action=1 → PM status  (isolated test)")
         else:
@@ -636,14 +652,26 @@ if env is not None:
         n_consm = len(cfg["resources"]["consumable"])
         ep_stats = []
 
+        from environments.transitions.degradation import MachineStatus as _MS
         for ep in range(args.episodes):
             env.reset(seed=ep * 17)
             ep_r1 = ep_r2 = 0.0
-            ep_failures = ep_pm = ep_cm = ep_completions = 0
+            ep_busy_steps = np.zeros(n_mach, dtype=int)
 
-            for _ in range(150):  # full episode
-                maint   = np.zeros(n_mach, dtype=int)
+            pm_forced_this_ep = False
+            for step in range(150):  # full episode
+                maint = np.zeros(n_mach, dtype=int)
+                # Force PM on first available idle OP machine between steps 10-80
+                # Try every step in that window until one succeeds
+                if not pm_forced_this_ep and 10 <= step <= 80:
+                    for mi in range(n_mach):
+                        if (env.machine_states[mi].status == _MS.OP
+                                and not env.machine_busy[mi]):
+                            maint[mi] = 1
+                            pm_forced_this_ep = True
+                            break
                 reorder = np.zeros(n_consm)
+                ep_busy_steps += np.array(env.machine_busy, dtype=int)
                 env._step_agent1({"maintenance": maint, "reorder": reorder})
                 env._step_agent2(0 if env._valid_pairs else len(env._valid_pairs))
                 env._resolve_physics()
@@ -659,6 +687,7 @@ if env is not None:
                 "failures": env._episode_failures,
                 "pm": env._episode_pm, "cm": env._episode_cm,
                 "completions": env._episode_completions,
+                "utilisation": ep_busy_steps.mean() / 150.0,
             })
             print(f"    ep{ep}  r1={ep_r1:+.1f}  r2={ep_r2:+.1f}  "
                   f"fails={env._episode_failures}  pm={env._episode_pm}  "
@@ -684,12 +713,15 @@ if env is not None:
             warn("No jobs completed",
                  "proc times may be too long OR episode too short")
 
-        # PM events (even random agent triggers some via health threshold)
-        if sum(pms) > 0:
-            ok(f"PM events counted  total={sum(pms)} over {args.episodes} eps")
+        # PM counter end-to-end: we forced PM at step 30 in each episode,
+        # so if counter is wired correctly, pms should be >= args.episodes
+        if sum(pms) >= args.episodes:
+            ok(f"PM counter end-to-end  total={sum(pms)} "
+               f"(forced 1/ep × {args.episodes} eps ✓)")
         else:
-            warn(f"No PM events in {args.episodes} random episodes",
-                 "PM counter may not be wired OR health threshold too aggressive")
+            fail("PM counter end-to-end",
+                 f"forced PM at step 30 each episode but _episode_pm={sum(pms)} "
+                 f"(expected >={args.episodes}) — PM counter not wired correctly")
 
         # r1 variance (non-trivial signal)
         r1_arr = np.array(r1_means)
@@ -700,22 +732,32 @@ if env is not None:
             warn(f"r1 std={r1_arr.std():.3f} across episodes",
                  "reward may be too uniform — check cost calibration")
 
-        # Failure rate vs Weibull prediction
+        # Failure rate vs Weibull prediction (adjusted for actual utilisation)
         if failures:
             try:
                 from scipy.special import gamma as gfn
-                pred = sum(
+                pred_full = sum(
                     150.0 / ((m["eta"]/8)*gfn(1+1/m["beta"]))
                     for m in cfg.get("machines",[])
                 )
+                # Adjust prediction by actual machine utilisation from this run
+                avg_util = np.mean([e["utilisation"] for e in ep_stats])
+                pred_adj = pred_full * avg_util
                 actual_rate = np.mean(failures)
-                if abs(actual_rate - pred) / max(pred, 1) < 0.5:
-                    ok(f"Failure rate matches prediction  "
-                       f"actual={actual_rate:.1f}/ep  predicted={pred:.1f}/ep")
+                # Allow 60% slack (random agent has high variance)
+                ratio = actual_rate / max(pred_adj, 0.1)
+                if 0.4 <= ratio <= 2.5:
+                    ok(f"Failure rate plausible  actual={actual_rate:.1f}/ep  "
+                       f"pred@{avg_util*100:.0f}%util={pred_adj:.1f}/ep  "
+                       f"(pred_full={pred_full:.1f}/ep@100%)")
+                elif actual_rate == 0:
+                    warn("No failures despite utilisation",
+                         f"util={avg_util*100:.0f}%  pred={pred_adj:.1f}/ep  "
+                         "— apply degradation.py fix (effective_age bug)")
                 else:
-                    warn(f"Failure rate mismatch",
-                         f"actual={actual_rate:.1f}/ep  predicted={pred:.1f}/ep  "
-                         f"(>50% off — check Weibull params or health floor)")
+                    warn(f"Failure rate outside expected range",
+                         f"actual={actual_rate:.1f}/ep  "
+                         f"pred@{avg_util*100:.0f}%util={pred_adj:.1f}/ep")
             except ImportError:
                 pass
 

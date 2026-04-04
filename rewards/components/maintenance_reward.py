@@ -66,56 +66,69 @@ def compute_rul_bonus(
 
 
 def compute_maintenance_reward(
-    maintenance_actions: List[int],    # [n_machines] 0=none,1=PM,2=CM
-    ordering_cost:       float,        # raw ordering cost from resource_dynamics
+    maintenance_actions: List[int],       # [n_machines] 0=none,1=PM,2=CM
+    ordering_cost:       float,           # raw ordering cost from resource_dynamics
     machine_states:      List[MachineState],
-    eta_values:          List[float],  # characteristic life per machine
+    eta_values:          List[float],     # characteristic life per machine
     shared_reward:       float,
     weights:             dict,
-    inventory_total:     float = 0.0,  # sum of consumable inventory levels
+    inventory_total:     float = 0.0,     # sum of consumable inventory levels
+    delta_ruls:          List[float] = None,  # ΔRUL per machine (design doc §6.2)
 ) -> float:
     """
-    Computes Agent 1's reward — aligned with eq. 3.14 objective.
+    Agent 1 reward — design doc v2 eq. 3.14 + Section 6.2 DELTA-RUL signal.
 
-    Args:
-        maintenance_actions: Agent 1 maintenance decisions this step
-        ordering_cost:       Total consumable ordering cost (before δ weighting)
-        machine_states:      Post-tick machine states
-        eta_values:          Weibull η per machine (for RUL normalisation)
-        shared_reward:       R_shared_t (criticality-weighted failure penalty)
-        weights:             Reward weight coefficients from reward_weights.yaml
+    r1 = -c_PM*n_PM - c_CM*n_CM          [maintenance action costs]
+         - delta_obj * ordering_cost      [resource ordering]
+         - w_hold * inventory_total       [holding cost, EOQ theory §7.5]
+         + w_RUL * mean(DELTA_RUL)        [DENSE: change in RUL fleet §6.2]
+         + w_avail * delta_availability   [DENSE: change in system availability]
+         + lambda * R_shared              [shared failure penalty]
 
-    Returns:
-        r1_t scalar
+    DELTA_RUL per machine per step (design doc §6.2):
+        PM this step:    DELTA_RUL = RUL_after - RUL_before ~ +30-40 shifts (positive)
+        Normal operate:  DELTA_RUL = -1  (one shift of life consumed)
+        Failed:          DELTA_RUL = large negative (life collapses to ~0)
+
+    This is causally linked to Agent 1's actions: PM fires a positive DELTA_RUL
+    spike every step of maintenance, giving immediate dense credit.
     """
-    c_PM        = weights.get("c_PM", 1.0)
-    c_CM        = weights.get("c_CM", 3.0)
-    delta_obj   = weights.get("delta_obj", 0.5)
-    w_avail     = weights.get("w_avail", 2.0)
-    w_RUL       = weights.get("w_RUL", 0.5)
-    rul_thresh  = weights.get("rul_threshold", 0.3)
-    lam         = weights.get("lambda_shared", 0.3)
-    w_hold      = weights.get("w_hold", 0.0)
+    c_PM       = weights.get("c_PM",        1.0)
+    c_CM       = weights.get("c_CM",        7.0)
+    delta_obj  = weights.get("delta_obj",   0.5)
+    w_avail    = weights.get("w_avail",     0.5)
+    w_RUL      = weights.get("w_RUL",       0.05)
+    lam        = weights.get("lambda_shared", 0.3)
+    w_hold     = weights.get("w_hold",      0.005)
 
-    # Maintenance action costs
-    maint_cost = 0.0
-    for action in maintenance_actions:
-        if action == 1:    maint_cost += c_PM
-        elif action == 2:  maint_cost += c_CM
+    # ── Maintenance action costs ─────────────────────────────────────────
+    maint_cost = sum(c_PM if a == 1 else c_CM if a == 2 else 0
+                     for a in maintenance_actions)
 
-    # Resource ordering cost (δ-weighted per eq. 3.14)
+    # ── Resource ordering cost ──────────────────────────────────────────
     resource_cost = delta_obj * ordering_cost
 
-    # Dense availability bonus (every step)
-    avail_bonus = w_avail * compute_system_availability(machine_states)
-
-    # Dense RUL preservation bonus (every step) — NEW
-    # Ties reward to Weibull reliability: preserve RUL = stay in useful-life phase
-    rul_bonus = w_RUL * compute_rul_bonus(machine_states, eta_values, rul_thresh)
-
-    # Inventory holding cost (EOQ theory: penalises excess stock)
+    # ── Inventory holding cost (EOQ theory §7.5) ────────────────────────
     holding_cost = w_hold * inventory_total
 
+    # ── DELTA-RUL fleet signal (design doc §6.2) ────────────────────────
+    # mean(ΔRUL_m) across OP machines — fires positive on PM, -1 normally
+    if delta_ruls is not None and len(delta_ruls) > 0:
+        op_deltas = [
+            dr for dr, s in zip(delta_ruls, machine_states)
+            if s.status == MachineStatus.OP
+        ]
+        delta_rul_signal = float(np.mean(op_deltas)) if op_deltas else 0.0
+    else:
+        # Fallback: use RUL level fraction if delta not available
+        delta_rul_signal = compute_rul_bonus(machine_states, eta_values, 0.3)
+
+    rul_bonus = w_RUL * delta_rul_signal
+
+    # ── Availability change bonus ───────────────────────────────────────
+    # w_avail rewards MAINTAINING high availability (level, per design doc)
+    avail_bonus = w_avail * compute_system_availability(machine_states)
+
     r1 = (-maint_cost - resource_cost - holding_cost
-          + avail_bonus + rul_bonus + lam * shared_reward)
+          + rul_bonus + avail_bonus + lam * shared_reward)
     return float(r1)

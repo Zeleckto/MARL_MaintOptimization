@@ -4,7 +4,7 @@ environments/spaces/observation_spaces.py
 Defines observation space dimensions for both agents.
 
 Agent 1 (PDM): flat vector
-    Per-machine features (15 * n_machines)
+    Per-machine features (14 * n_machines)
     + resource state (n_renewable + n_consumable * (1 + max_lead_time))
     + job summary (5 aggregate stats)
 
@@ -12,7 +12,7 @@ Agent 2 (Job Shop): HeteroData graph
     Node feature dims are defined here; graph structure in graph_builder.py
 
 These dims must stay consistent with:
-    - MachineState.to_feature_vector()  -> 15 dims
+    - MachineState.to_feature_vector()  -> 14 dims
     - ResourceState.to_flat_vector()    -> computed from config
     - Operation.to_feature_vector()     -> 10 dims
     - Job.to_feature_vector()           -> 7 dims
@@ -23,7 +23,7 @@ from typing import Dict, Tuple
 
 # Node feature dimensions for TGIN (Table 3.9 in report)
 OP_FEATURE_DIM      = 10
-MACHINE_FEATURE_DIM = 15
+MACHINE_FEATURE_DIM = 14
 JOB_FEATURE_DIM     = 7
 
 # Edge feature dimensions (Table 3.10 in report)

@@ -87,7 +87,7 @@ class MachineState:
     beta: float                        # shape parameter
     eta: float                         # scale parameter (hours)
     delta_h: float                     # health degradation rate per operating shift (health units/shift)
-    h_PM_threshold: float              # health at which PM should be triggered (Agent 1 decides)
+    # h_PM_threshold removed: agent learns PM timing from reward signal (design doc Q2)
     h_critical: float                  # health at which machine fails deterministically
     tau_PM_shifts: int                 # PM duration in timesteps (shifts)
     tau_CM_shifts: int                 # CM duration in timesteps
@@ -116,7 +116,7 @@ class MachineState:
 
     def to_feature_vector(self) -> np.ndarray:
         """
-        Returns 15-dim numpy array for TGIN machine node features.
+        Returns 14-dim numpy array for TGIN machine node features.
         Order must match Table 3.9 in report and graph_builder.py exactly.
 
         Features:
@@ -133,8 +133,7 @@ class MachineState:
             [10] is_operating (binary)
             [11] is_under_maint (binary: PM or CM)
             [12] is_failed (binary)
-            [13] health_below_pm_threshold (binary signal)
-            [14] health_below_critical (binary signal)
+            [13] health_below_critical (binary signal)
         """
         eta_h = self.eta  # characteristic life in hours
         tau_cm_h = self.tau_CM_shifts * 8.0  # convert shifts to hours
@@ -153,8 +152,7 @@ class MachineState:
             float(self.status == MachineStatus.OP),                    # [10]
             float(self.status in [MachineStatus.PM, MachineStatus.CM]), # [11]
             float(self.status == MachineStatus.FAIL),                  # [12]
-            float(self.health <= self.h_PM_threshold),                 # [13]
-            float(self.health <= self.h_critical),                     # [14]
+            float(self.health <= self.h_critical),                     # [13] backstop flag
         ], dtype=np.float32)
 
         return features
@@ -456,13 +454,13 @@ def build_machine_states(machine_configs: List[dict], stoch_level: int = 1) -> L
             machine_id=cfg["machine_id"],
             beta=cfg["beta"],
             eta=cfg["eta"],
-            delta_h=cfg["delta_h"],
-            h_PM_threshold=cfg["h_PM_threshold"],
-            h_critical=cfg["h_critical"],
+            delta_h=cfg.get("delta_h", 0.4),       # legacy field, unused in physics
+            h_critical=cfg.get("h_critical", 10.0),
             tau_PM_shifts=cfg["tau_PM_shifts"],
             tau_CM_shifts=cfg["tau_CM_shifts"],
-            h_restore_PM=cfg["h_restore_PM"],
-            h_restore_CM=cfg["h_restore_CM"],
+            h_restore_PM=cfg.get("h_restore_PM", 30.0),  # legacy, unused
+            h_restore_CM=cfg.get("h_restore_CM", 60.0),  # legacy, unused
+            # h_PM_threshold removed: agent learns PM timing (design doc Q2)
             # All dynamic fields default to initial values in dataclass
         )
         # Compute initial derived features

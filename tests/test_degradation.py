@@ -148,7 +148,7 @@ def test_health_never_goes_below_zero(engine, rng):
 def test_feature_vector_length(machine):
     """to_feature_vector() must return exactly 15 features."""
     vec = machine.to_feature_vector()
-    assert vec.shape == (15,), f"Expected 15 features, got {vec.shape}"
+    assert vec.shape == (14,), f"Expected 14 features, got {vec.shape}"
 
 
 def test_feature_vector_dtype(machine):

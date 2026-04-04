@@ -1,86 +1,65 @@
-# configs/base.yaml
-# =================
-# Master configuration. All other phase configs inherit from this.
-# Change values here to affect all phases unless overridden in phase configs.
+# =============================================================================
+# configs/base.yaml  -  MARL Manufacturing Master Config
+# BTP2 (MCD412) - Shreenath Jha & Kirtan Gehlot - IIT Delhi - 2026
+# Supervisor: Dr. Minakshi Kumari
 #
-# Aligned with MARL_EnvironmentDesign_v2.docx (April 2026)
-# Key changes vs v0:
-#   - t_max_train: 200 -> 150  (2 MTBF cycles, design doc Section 1)
-#   - n_jobs_train: 20 -> 40   (100% utilisation target, design doc Section 2)
-#   - entropy_coef: 0.01 -> 0.05  (collapse prevention, design doc note)
-#   - Machine eta: recalculated for ~1-2 Weibull failures/machine/episode
-#   - delta_h: reduced so Weibull (not health floor) is primary failure driver
-#   - Op-type compatibility matrix: 7 types x 5 machines = 42.9% eligibility
-#   - Proc times: [1,16]h -> [16,56]h = [2,7] shifts, mean=4.5 -> 101.5% util
+# Design Doc v2 aligned (April 2026).
+# Phase yamls only override stochasticity_level.
+# Pure ASCII - safe for all Windows encodings.
+# =============================================================================
 
-# --- Reproducibility -------------------------------------------------------
 seed: 42
+stochasticity_level: 1            # 1=deterministic, 2=+LogNormal noise, 3=+Poisson arrivals
 
-# --- Stochasticity phase (overridden in phase1/2/3.yaml) -------------------
-# 1 = Weibull failures only
-# 2 = Phase 1 + LogNormal proc times, Beta repair effectiveness
-# 3 = Phase 2 + Poisson arrivals, LogNormal lead times
-stochasticity_level: 1
-
-# --- Environment -----------------------------------------------------------
+# --- Environment -------------------------------------------------------------
 environment:
   n_parallel_envs: 4
   max_jobs_in_system: 50
 
-# --- Episode ---------------------------------------------------------------
+# --- Episode -----------------------------------------------------------------
 episode:
-  t_max_train: 150              # design doc Section 1: ~2 MTBF cycles
+  t_max_train: 150                 # 150 shifts * 8h = 1200 simulated hours
   t_max_eval:  300
-  dt_hours: 8.0                 # 1 shift = 8 hours
+  dt_hours:    8.0                 # 1 shift = 8 hours
 
-# --- Degradation (Weibull + Kijima) ----------------------------------------
+# --- Weibull + Kijima degradation --------------------------------------------
 degradation:
-  dt_hours: 8.0                 # must match episode.dt_hours
-  q_fixed: 0.5                  # Phase 1: fixed repair effectiveness
-  alpha_q: 5.0                  # Phase 2+: Beta distribution alpha
-  beta_q:  5.0                  # Phase 2+: Beta distribution beta
+  dt_hours: 8.0
+  q_fixed:  0.5                   # Kijima Type I: q=0 perfect repair, q=1 minimal repair
+  alpha_q:  5.0                   # Beta(alpha_q, beta_q) for Phase 3 stochastic q
+  beta_q:   5.0
 
-# --- Machines (M=5, 4 machine types) ---------------------------------------
-# Weibull eta calibrated for ~1-2 failures per machine per 150-shift episode.
-# MTBF_shifts = eta_hours / (8 * Gamma(1 + 1/beta)) ~ 0.887 * eta_shifts
+# --- Machines (5 machines, Weibull beta and eta calibrated) ------------------
+# Health model: H(t) = 100 * exp(-(effective_age/eta)^beta)   [Weibull survival]
+#   H=80% -> 80% survival probability, 20% cumulative failure probability
+#   h_critical=10%: backstop at 90% cumulative failure prob -> deterministic FAIL
 #
-# Machine types:
-#   Type A - Heavy cutting:  M0 (CNC Mill), M1 (Lathe)
-#   Type B - Medium:         M2 (Grinder)
-#   Type C - Precision:      M3 (Press)
-#   Type D - Inspection:     M4 (CMM)
+# h_PM_threshold REMOVED: agent learns optimal PM timing from reward signal
+#   (DELTA-RUL + failure penalty, design doc Sec 6.2 + Q2)
 #
-# eta derivation:  target_fails = 150/MTBF  =>  eta = MTBF*8/Gamma(1+1/beta)
-#   M0: beta=2.8, target 1.5f, MTBF=100sh -> eta=898h  ~ 900h
-#   M1: beta=2.2, target 1.2f, MTBF=125sh -> eta=1129h ~ 1100h
-#   M2: beta=3.0, target 2.0f, MTBF=75sh  -> eta=672h  ~ 700h
-#   M3: beta=3.2, target 1.3f, MTBF=115sh -> eta=1031h ~ 1000h
-#   M4: beta=2.5, target 1.0f, MTBF=150sh -> eta=1352h ~ 1350h
-#   Fleet avg MTBF=113sh, avg 1.33 fails/machine/episode
+# delta_h / h_restore_PM/CM: kept for legacy code compatibility, NOT used in physics
+#   (health is Weibull survival, not a linear counter)
 #
-# delta_h set so health floor (h_critical=10) is NOT hit within 150 shifts
-# without PM: require (100-10)/delta_h > 150  =>  delta_h < 0.60
+# MTBF = eta * Gamma(1 + 1/beta) per machine
 machines:
   - machine_id: 0
-    name: "CNC Mill"
-    type: "A"
+    name: CNC Mill
+    type: A
     beta: 2.8
-    eta: 900.0                   # MTBF~100sh, ~1.5 fails/ep
-    delta_h: 0.40                # floor at (100-10)/0.40=225 shifts > 150
-    h_PM_threshold: 60.0
-    h_critical: 10.0
+    eta:  900.0                   # MTBF ~100 shifts -> ~1.5 failures/ep at full util
+    delta_h: 0.4                  # legacy, unused
+    h_critical: 10.0              # deterministic failure backstop (90% cumul fail prob)
     tau_PM_shifts: 2
     tau_CM_shifts: 6
-    h_restore_PM: 35.0
+    h_restore_PM: 35.0            # legacy, unused
     h_restore_CM: 65.0
 
   - machine_id: 1
-    name: "Lathe"
-    type: "A"
+    name: Lathe
+    type: A
     beta: 2.2
-    eta: 1100.0                  # MTBF~122sh, ~1.2 fails/ep
-    delta_h: 0.35                # floor at 257 shifts
-    h_PM_threshold: 58.0
+    eta:  1100.0                  # MTBF ~122 shifts -> ~1.2 failures/ep
+    delta_h: 0.35
     h_critical: 10.0
     tau_PM_shifts: 2
     tau_CM_shifts: 5
@@ -88,12 +67,11 @@ machines:
     h_restore_CM: 60.0
 
   - machine_id: 2
-    name: "Grinder"
-    type: "B"
+    name: Grinder
+    type: B
     beta: 3.0
-    eta: 700.0                   # MTBF~78sh, ~2.0 fails/ep (highest wear)
-    delta_h: 0.50                # floor at 180 shifts
-    h_PM_threshold: 65.0
+    eta:  700.0                   # MTBF ~78 shifts -> ~1.9 failures/ep (highest risk)
+    delta_h: 0.5
     h_critical: 10.0
     tau_PM_shifts: 3
     tau_CM_shifts: 8
@@ -101,12 +79,11 @@ machines:
     h_restore_CM: 70.0
 
   - machine_id: 3
-    name: "Press"
-    type: "C"
+    name: Press
+    type: C
     beta: 3.2
-    eta: 1000.0                  # MTBF~112sh, ~1.3 fails/ep
-    delta_h: 0.42                # floor at 214 shifts
-    h_PM_threshold: 62.0
+    eta:  1000.0                  # MTBF ~112 shifts -> ~1.3 failures/ep
+    delta_h: 0.42
     h_critical: 10.0
     tau_PM_shifts: 2
     tau_CM_shifts: 6
@@ -114,131 +91,124 @@ machines:
     h_restore_CM: 65.0
 
   - machine_id: 4
-    name: "CMM"
-    type: "D"
+    name: CMM
+    type: D
     beta: 2.5
-    eta: 1350.0                  # MTBF~150sh, ~1.0 fail/ep
-    delta_h: 0.30                # floor at 300 shifts (slowest)
-    h_PM_threshold: 55.0
+    eta:  1350.0                  # MTBF ~150 shifts -> ~1.0 failures/ep
+    delta_h: 0.3
     h_critical: 10.0
     tau_PM_shifts: 2
     tau_CM_shifts: 5
     h_restore_PM: 28.0
     h_restore_CM: 55.0
 
-# --- Resources (R=6 types) -------------------------------------------------
+# --- Resources ---------------------------------------------------------------
 resources:
   renewable:
     - resource_id: 0
-      name: "Technicians"
+      name: Technicians
       capacity: 3
-
     - resource_id: 1
-      name: "Tools"
+      name: Tools
       capacity: 4
-
     - resource_id: 2
-      name: "Maintenance Bays"
+      name: Maintenance Bays
       capacity: 2
-
   consumable:
     - resource_id: 3
-      name: "Spare Parts"
+      name: Spare Parts
       initial_inventory: 20
       lead_time_shifts: 5
       reorder_cost: 10.0
-
     - resource_id: 4
-      name: "Lubricants"
+      name: Lubricants
       initial_inventory: 15
       lead_time_shifts: 3
       reorder_cost: 5.0
-
     - resource_id: 5
-      name: "Consumable Tools"
+      name: Consumable Tools
       initial_inventory: 10
       lead_time_shifts: 4
       reorder_cost: 8.0
 
-# --- Reward weights --------------------------------------------------------
-# Must match rewards/reward_weights.yaml (yaml wins at runtime).
-# Ratios: c_PM:c_CM:c_fail = 1:7:25 (Pintelon & Parodi-Herz 2008)
+# --- Reward (base values; full weights in rewards/reward_weights.yaml) --------
 reward:
   c_fail: 25.0
-  c_PM:    1.0
-  c_CM:    7.0
+  c_PM:   1.0
+  c_CM:   7.0
   w_avail: 0.5
-  w_tard:  5.0
-  w_comp:  3.0
+  w_tard: 1.0
+  w_comp: 3.0
   w_health: 0.5
   lambda_shared: 0.3
 
-# --- MAPPO Hyperparameters -------------------------------------------------
+# --- MAPPO hyperparameters ---------------------------------------------------
 mappo:
-  lr_actor1: 0.0001
-  lr_actor2: 0.0003
-  lr_critic:  0.001
-  gamma: 0.99
-  gae_lambda: 0.95
-  clip_eps: 0.2
-  entropy_coef: 0.05           # design doc: 5x v0 value, prevents early collapse
+  lr_actor1:       0.0001
+  lr_actor2:       0.0003
+  lr_critic:       0.001
+  gamma:           0.99
+  gae_lambda:      0.95
+  clip_eps:        0.2
+  entropy_coef:    0.05            # 5x higher than default -> prevents early collapse
   value_loss_coef: 0.5
-  max_grad_norm: 0.5
-  rollout_steps: 2048
-  ppo_epochs: 5
-  minibatch_size: 64
+  max_grad_norm:   0.5
+  rollout_steps:   2048
+  ppo_epochs:      10
+  minibatch_size:  64
 
-# --- TGIN Architecture -----------------------------------------------------
+# --- TGIN (Agent 2 policy network) -------------------------------------------
 tgin:
-  n_layers: 3
-  hidden_dim: 256
-  eps: 0.0
-  op_feature_dim: 10
-  machine_feature_dim: 15
-  job_feature_dim: 7
+  n_layers:            3
+  hidden_dim:          256
+  eps:                 0.0
+  op_feature_dim:      10
+  machine_feature_dim: 14
+  job_feature_dim:     7
 
-# --- Agent 1 MLP -----------------------------------------------------------
+# --- MLP Policy (Agent 1) ----------------------------------------------------
 mlp_policy:
   hidden_dims: [256, 256]
 
-# --- Critic ----------------------------------------------------------------
+# --- Centralized Critic ------------------------------------------------------
 critic:
   hidden_dims: [512, 256]
 
-# --- Job Parameters --------------------------------------------------------
-# Utilisation: load=40*4*4.5=720 / capacity=5*150*0.945=709 => 101.5%
+# --- Job Shop (design doc Sec 2) ---------------------------------------------
+# Utilisation rho = J * Y_avg * mean_proc / (M * T * A)
+#                 = 40 * 4 * 5.0 / (5 * 150 * 0.946) = 112.8%
+#                 tight load -> some tardiness guaranteed -> real scheduling pressure
 #
-# Op-type compatibility (7 types, 4 machine types, 42.9% eligibility):
-#   type 0 drilling   : [0,1,2]  A+B   60%
-#   type 1 turning    : [0,1,3]  A+C   60%
-#   type 2 grinding   : [2,3,4]  B+C+D 60%
-#   type 3 milling    : [0,1]    A     40%
-#   type 4 boring     : [2,3]    B+C   40%
-#   type 5 pressing   : [1]      A     20%
-#   type 6 inspection : [4]      D     20%
-#   Total 15/35 = 42.9%
+# Processing times [16,64]h = [2,8] shifts (design doc Sec 2.3, Fattahi et al. 2010)
+#   2 shifts: light CNC machining (turning, drilling, basic milling)
+#   8 shifts: heavy precision work (large die machining, turbine blade grinding)
 jobs:
-  n_jobs_train: 40
-  n_ops_per_job_min: 2
-  n_ops_per_job_max: 6          # mean Y_avg = (2+6)/2 = 4
-  proc_time_min_hours: 16.0     # 2 shifts  (light machining)
-  proc_time_max_hours: 72.0     # 9 shifts  (heavy precision) — mean 4.5 shifts
-  lambda_arr: 0.5               # Phase 3 only: Poisson arrival rate (jobs/shift)
+  n_jobs_train:        40
+  n_ops_per_job_min:   2
+  n_ops_per_job_max:   6
+  proc_time_min_hours: 16.0
+  proc_time_max_hours: 64.0
+  lambda_arr: 0.5                 # Phase 3 Poisson arrival rate (jobs/shift)
+
+  # Op-type -> eligible machine IDs (42.9% = 15/35 pairs, design doc Sec 2.4)
+  # 7 operation types * 5 machines. Each op type has >=1 eligible machine.
+  # Bottlenecks: type 5 (Lathe only), type 6 (CMM only)
+  # -> if M1 or M4 fails, those op types are blocked -> maintenance urgency
   op_type_compatibility:
-    0: [0, 1, 2]
-    1: [0, 1, 3]
-    2: [2, 3, 4]
-    3: [0, 1]
-    4: [2, 3]
-    5: [1]
-    6: [4]
+    0: [0, 1, 2]                  # CNC Mill, Lathe, Grinder
+    1: [0, 1, 3]                  # CNC Mill, Lathe, Press
+    2: [2, 3, 4]                  # Grinder, Press, CMM
+    3: [0, 1]                     # CNC Mill, Lathe
+    4: [2, 3]                     # Grinder, Press
+    5: [1]                        # Lathe only (single-machine bottleneck)
+    6: [4]                        # CMM only   (single-machine bottleneck)
 
-# --- Processing time noise (Phase 2+) -------------------------------------
+# --- Processing time noise (Phase 2+) ----------------------------------------
 processing:
-  sigma_log: 0.15
+  sigma_log: 0.15                 # LogNormal sigma for proc time noise (Phase 2+)
 
-# --- Logging ---------------------------------------------------------------
+# --- Logging -----------------------------------------------------------------
 logging:
-  tensorboard_dir: "runs/"
-  checkpoint_dir:  "checkpoints/"
+  tensorboard_dir:      "runs/"
+  checkpoint_dir:       "checkpoints/"
   log_every_n_episodes: 10

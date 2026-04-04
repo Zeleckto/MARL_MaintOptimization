@@ -57,8 +57,13 @@ class MAPPOTrainer:
         # Environment
         self.env = ManufacturingEnv(config)
 
+        # Measure actual obs_dim from a live reset so the network input
+        # layer always matches reality, even if the formula is stale.
+        _obs_init, _ = self.env.reset(seed=config.get("seed", 42))
+        actual_obs_dim = int(_obs_init[AGENT_PDM].shape[0])
+
         # Agents
-        self.agent1 = PDMAgent(config, device=self.device)
+        self.agent1 = PDMAgent(config, device=self.device, obs_dim=actual_obs_dim)
         self.agent2 = JobShopAgent(config, device=self.device)
 
         # Critic
@@ -252,6 +257,33 @@ class MAPPOTrainer:
                         s.health for s in self.env.machine_states
                     ]))
 
+                    # ── Compute the 7 additional logger metrics ────────────
+                    # jobs_late: completed jobs that finished after due date
+                    n_jobs_late = sum(
+                        1 for j in self.env.jobs
+                        if j.is_complete and j.completion_time is not None
+                        and j.completion_time > j.due_date
+                    )
+                    # service_level: fraction of completed jobs on time
+                    n_completed = self.env._episode_completions
+                    n_on_time   = n_completed - n_jobs_late
+                    service_level = float(n_on_time) / max(n_completed, 1)
+
+                    # avg_hazard_rate: fleet mean instantaneous hazard
+                    avg_hazard = float(np.mean([
+                        s.hazard_rate for s in self.env.machine_states
+                    ]))
+
+                    # mtbf: average shifts between failures this episode
+                    mtbf = float(self.env.current_step) / max(
+                        self.env._episode_failures, 1
+                    )
+
+                    # avg_inventory: mean consumable stock level
+                    avg_inv = float(np.mean(
+                        self.env.resource_state.consumable_inventory
+                    ))
+
                     if self.episode % self.log_every == 0:
                         print(
                             f"  ep={self.episode:>5} | "
@@ -274,6 +306,13 @@ class MAPPOTrainer:
                         ),
                         n_jobs_completed = self.env._episode_completions,
                         avg_health       = avg_health,
+                        n_PM             = self.env._episode_pm,
+                        n_CM             = self.env._episode_cm,
+                        n_jobs_late      = n_jobs_late,
+                        avg_hazard_rate  = avg_hazard,
+                        mtbf             = mtbf,
+                        service_level    = service_level,
+                        avg_inventory    = avg_inv,
                     )
 
                     self.episode += 1

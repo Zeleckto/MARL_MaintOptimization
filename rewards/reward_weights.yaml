@@ -1,47 +1,46 @@
 # rewards/reward_weights.yaml
 # ============================
-# All reward coefficients in ONE place.
-# Literature basis:
-#   c_PM:c_CM:c_fail = 1:7:25
-#   c_CM = 7 justified: break-even > c_PM / P(fail) = 1/0.162 = 6.17
-#   c_fail = 25: 15-40x PM cost typical for discrete manufacturing
-#   (Pintelon & Parodi-Herz 2008, Nakagawa 2005)
+# All reward coefficients. Never hardcode these in Python.
+# Edit here to retune without touching any .py files.
 #
-# ΔRUL calibration: w_RUL = 0.05 so PM reward ≈ PM cost
-#   0.05 * 35_shifts_of_RUL = 1.75 ≈ c_PM = 1.0  ✓
-#
-# Holding cost: w_hold = 0.005 (consistent with EOQ theory)
+# Aligned with MARL_EnvironmentDesign_v2.docx Table 1.1 (April 2026)
+# Changes vs v0:
+#   c_CM:   3.0 -> 7.0   (literature ratio c_PM:c_CM:c_fail = 1:7:25)
+#   c_fail: 30.0 -> 25.0 (literature ratio)
+#   w_RUL:  0.5  -> 0.05  (calibrated: 0.05*35 ΔRUL_shifts = 1.75 ≈ c_PM=1)
+#   w_avail: 2.0 -> 0.5   (ΔRUL-based signal, not absolute level)
+#   w_hold: NEW  = 0.005  (EOQ holding cost — prevents inventory flooding)
 
-# --- Maintenance costs (Agent 1) ---
-c_PM:   1.0     # cost per PM action
-c_CM:   7.0     # cost per CM action  (7x PM — literature grounded)
-c_fail: 25.0    # cost per FAILURE    (25x PM — unplanned downtime)
+# --- Failure penalty -------------------------------------------------------
+# c_PM:c_CM:c_fail = 1:7:25  (Pintelon & Parodi-Herz 2008)
+# CM/PM ratio 5-8x typical in literature. Unplanned failure 15-40x PM.
+c_fail: 25.0
+criticality_multiplier: 5.0    # bottleneck machine: penalty *= (1 + 5*crit)
+lambda_shared: 0.3             # fraction of R_shared each agent receives
 
-# --- Ordering cost ---
-delta:  0.5     # per-unit ordering cost multiplier
+# --- Agent 1 (PDM) costs ---------------------------------------------------
+c_PM: 1.0                      # proactive — cheapest
+c_CM: 7.0                      # reactive — 7x PM cost
+delta_obj: 0.5                 # weight on resource ordering cost (eq. 3.14 delta)
 
-# --- Inventory holding cost ---
-w_hold: 0.005   # per unit per step (prevents over-ordering)
+# --- Agent 1 dense bonuses -------------------------------------------------
+w_avail: 0.5                   # system availability bonus per step (ΔRUL-based)
+w_RUL: 0.05                    # RUL preservation: 0.05 * 35 ΔRUL_shifts = 1.75 ≈ c_PM
+rul_threshold: 0.3             # below this fraction of eta, no RUL bonus
 
-# --- ΔRUL signal (Agent 1 dense reward) ---
-# Fires every step: reward = w_RUL * (RUL_{t+1} - RUL_t) for each machine
-# This gives Agent 1 a continuous signal toward preventive behavior.
-w_RUL:  0.05
+# --- Inventory holding cost (NEW) ------------------------------------------
+# Consistent with EOQ theory: prevents agent flooding inventory
+# At steady-state ~12 total units: cost = 0.005*12 = 0.06/step = 9 over 150 steps
+# vs PM savings of c_fail avoided ≈ 25*2 = 50 -> holding cost real but not dominant
+w_hold: 0.005
 
-# --- System availability (Agent 1) ---
-# w_avail fires every step based on fraction of OP machines
-w_avail: 2.0
+# --- Agent 2 (Job Shop) weights --------------------------------------------
+alpha: 1.0                     # tardiness weight (eq. 3.14 alpha)
+w_tard: 5.0                    # normalised tardiness penalty scale
+w_comp: 3.0                    # job completion bonus per job finished this step
+w_health: 0.5                  # health-aware dispatch bonus per assignment
+beta_makespan: 0.2             # running makespan estimate penalty (eq. 3.14 beta)
 
-# --- Scheduling (Agent 2) ---
-w_tard:   5.0   # weighted tardiness penalty coefficient
-w_comp:   3.0   # completion bonus per job finished this step
-w_health: 0.5   # health-aware dispatch bonus (prefer healthy machines)
-w_slack:  0.2   # on-track bonus (ops with positive slack)
-
-# --- Shared failure penalty ---
-lambda_shared: 0.3   # fraction of R_shared credited to each agent
-
-# --- Objective weights for metrics (not training rewards) ---
-alpha:     1.0    # tardiness weight in total cost
-gamma_obj: 1.0    # maintenance cost weight in total cost
-delta_obj: 0.0    # ordering cost weight in total cost
+# --- Objective scalarisation (paper reporting, eq. 3.14) ------------------
+# Not used in reward computation — used in benchmarks/metrics.py
+gamma_obj: 1.0

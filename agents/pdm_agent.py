@@ -28,7 +28,7 @@ class PDMAgent:
     Agent 1: Predictive Maintenance + Resource Ordering decisions.
     """
 
-    def __init__(self, config: dict, device: str = "cpu"):
+    def __init__(self, config: dict, device: str = "cpu", obs_dim: int = None):
         self.config = config
         self.device = device
         self.n_machines   = len(config.get("machines", []))
@@ -36,7 +36,7 @@ class PDMAgent:
         self.n_renewable  = len(config["resources"]["renewable"])
 
         if TORCH_AVAILABLE:
-            self.policy = MLPPolicy(config).to(device)
+            self.policy = MLPPolicy(config, obs_dim=obs_dim).to(device)
         else:
             self.policy = None
 

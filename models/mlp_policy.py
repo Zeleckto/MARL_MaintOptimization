@@ -28,14 +28,17 @@ class MLPPolicy(nn.Module if TORCH_AVAILABLE else object):
     Agent 1 actor: flat obs -> maintenance + reorder action distributions.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, obs_dim: int = None):
         if not TORCH_AVAILABLE:
             return
         super().__init__()
 
-        # Compute input dimension
-        from environments.spaces.observation_spaces import compute_agent1_obs_dim
-        obs_dim = compute_agent1_obs_dim(config)
+        # obs_dim: prefer caller-supplied value (measured from live env).
+        # Falls back to formula if not given. Formula can be stale when
+        # obs structure drifts between code versions.
+        if obs_dim is None:
+            from environments.spaces.observation_spaces import compute_agent1_obs_dim
+            obs_dim = compute_agent1_obs_dim(config)
 
         n_machines   = len(config.get("machines", []))
         n_consumable = len(config["resources"]["consumable"])

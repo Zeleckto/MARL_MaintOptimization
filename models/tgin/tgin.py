@@ -27,10 +27,15 @@ from typing import Dict, Tuple, Optional
 try:
     import torch
     import torch.nn as nn
-    from torch_geometric.nn import HeteroConv, GINEConv, Linear
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+
+try:
+    from torch_geometric.nn import HeteroConv, GINEConv, Linear  # noqa: F401
+    TG_AVAILABLE = True
+except ImportError:
+    TG_AVAILABLE = False
 
 
 class GINELayer(nn.Module if TORCH_AVAILABLE else object):
@@ -43,9 +48,9 @@ class GINELayer(nn.Module if TORCH_AVAILABLE else object):
     """
 
     def __init__(self, in_dim: int, out_dim: int, edge_dim: int, eps: float = 0.0):
+        super().__init__()
         if not TORCH_AVAILABLE:
             return
-        super().__init__()
 
         # MLP for message aggregation: maps (node + edge) features -> out_dim
         self.mlp = nn.Sequential(
@@ -96,9 +101,9 @@ class TGIN(nn.Module if TORCH_AVAILABLE else object):
     """
 
     def __init__(self, config: dict):
+        super().__init__()
         if not TORCH_AVAILABLE:
             return
-        super().__init__()
 
         tgin_cfg    = config.get("tgin", {})
         self.n_layers   = tgin_cfg.get("n_layers", 3)

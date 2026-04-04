@@ -65,7 +65,19 @@ def main():
 
     if args.resume:
         print(f"Resuming from: {args.resume}")
-        # TODO: load checkpoint into trainer
+        from utils.checkpoint import load_checkpoint
+        meta = load_checkpoint(
+            path         = args.resume,
+            actor1       = trainer.agent1.policy,
+            actor2       = trainer.agent2.tgin,
+            critic       = trainer.critic,
+            optim_actor1 = trainer.optim1,
+            optim_actor2 = trainer.optim2,
+            optim_critic = trainer.optim_critic,
+            device       = trainer.device,
+        )
+        trainer.global_step = meta["global_step"]
+        trainer.episode     = meta["episode"]
 
     trainer.train(total_timesteps=args.timesteps)
 

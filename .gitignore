@@ -49,3 +49,15 @@ secrets.yaml
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+
+# Generated artifacts — never commit these
+results/
+runs/
+checkpoints/
+__pycache__/
+*.pyc
+*.pt
+*.pth
+venv/
+.pytest_cache/

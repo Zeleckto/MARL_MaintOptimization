@@ -391,6 +391,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes",   type=int, default=10)
     parser.add_argument("--seed",       type=int, default=42)
+    parser.add_argument("--config",     default="configs/base.yaml")
     parser.add_argument("--jobs",       type=int, default=None)
     parser.add_argument("--outdir",     default="results/")
     parser.add_argument("--no-excel",   action="store_true")
@@ -401,6 +402,15 @@ def main():
     with open("configs/base.yaml") as f:
         config = yaml.safe_load(f)
 
+    if args.config != "configs/base.yaml":
+        with open(args.config) as f:
+            override = yaml.safe_load(f)
+        if override:
+            config.update(override)
+
+    print(f"Stochasticity level: {config.get('stochasticity_level', 1)}")
+        
+# Override number of parallel jobs if specified (for ABR+MDD+(Q,R) baseline)    
     if args.jobs:
         config["jobs"]["n_jobs_train"] = args.jobs
 

@@ -1,105 +1,96 @@
-from __future__ import annotations
 """
 rewards/components/maintenance_reward.py
 ==========================================
-Agent 1 (PDM) reward — aligned with report objective eq. 3.14.
+Agent 1 reward: maintenance costs + ΔRUL dense signal + availability + holding cost.
 
-r1_t = −c_PM·Σzᴾᴹₘ − c_CM·Σzᶜᴹₘ       [maintenance action costs]
-       −δ · Σcᵣ·Qᵣ                       [resource ordering cost, δ-weighted]
-       +w_avail · A_system(s_{t+1})       [DENSE availability bonus]
-       +w_RUL · RUL_bonus(s_{t+1})        [DENSE RUL preservation bonus — NEW]
-       +λ · R_shared_t                    [shared failure penalty]
+KEY REDESIGN (Phase 2):
+    OLD: w_avail * A_system_level  (step-level availability — not dense enough)
+    NEW: w_RUL * ΔRUL_fleet  (per-step RUL change across all machines)
 
-RUL bonus: rewards Agent 1 for keeping machines in the useful-life regime.
-Computed as mean(RUL_m / η_m) across machines — normalised remaining life fraction.
-Fires every step; small but consistent signal toward proactive maintenance.
+    ΔRUL fires every step with magnitude proportional to how much the
+    fleet's remaining useful life changed. This gives Agent 1 a continuous
+    gradient signal without needing a failure event.
+
+    Added: w_hold * sum(inventory) — holding cost discourages over-ordering.
+
+r1_t = -c_PM * n_PM
+       - c_CM * n_CM
+       - delta * ordering_cost
+       + w_RUL * ΔRUL_fleet
+       + w_avail * (fraction of OP machines)
+       - w_hold * sum(consumable_inventory)
+       + lambda * R_shared
 """
 
+from typing import List, Optional
 import numpy as np
-from typing import List
-from environments.transitions.degradation import MachineState, MachineStatus
 
-
-def compute_system_availability(machine_states: List[MachineState]) -> float:
-    """Fraction of machines in OP status."""
-    n_op = sum(1 for s in machine_states if s.status == MachineStatus.OP)
-    return n_op / max(len(machine_states), 1)
-
-
-def compute_rul_bonus(
-    machine_states: List[MachineState],
-    eta_values:     List[float],     # characteristic life per machine
-    rul_threshold:  float = 0.3,     # below this fraction of eta, no bonus
-) -> float:
-    """
-    Mean normalised RUL across operational machines.
-    Returns value in [0, 1].
-
-    Only counts OP machines — machines in PM/CM have no RUL risk right now.
-    If RUL < rul_threshold * eta, that machine contributes 0 (already degraded).
-
-    This directly encodes Weibull reliability:
-    high RUL fraction = machines in useful-life phase (low hazard rate)
-    low RUL fraction  = machines approaching wear-out (high hazard rate)
-    """
-    rul_fracs = []
-    for s, eta in zip(machine_states, eta_values):
-        if s.status != MachineStatus.OP:
-            continue
-        frac = s.rul / max(eta, 1.0)
-        if frac >= rul_threshold:
-            rul_fracs.append(min(frac, 1.0))
-        else:
-            rul_fracs.append(0.0)
-
-    return float(np.mean(rul_fracs)) if rul_fracs else 0.0
+from environments.transitions.degradation import MachineState, MachineStatus, estimate_rul
 
 
 def compute_maintenance_reward(
-    maintenance_actions: List[int],    # [n_machines] 0=none,1=PM,2=CM
-    ordering_cost:       float,        # raw ordering cost from resource_dynamics
-    machine_states:      List[MachineState],
-    eta_values:          List[float],  # characteristic life per machine
-    shared_reward:       float,
-    weights:             dict,
+    maintenance_actions:  List[int],         # [n_mach] 0=none, 1=PM, 2=CM
+    ordering_cost:        float,             # total cost of orders placed
+    machine_states:       List[MachineState],
+    prev_ruls:            Optional[List[float]],  # RUL before this step
+    consumable_inventory: Optional[List[float]],  # current inventory levels
+    shared_reward:        float,
+    weights:              dict,
 ) -> float:
     """
-    Computes Agent 1's reward — aligned with eq. 3.14 objective.
+    Computes Agent 1's reward for one timestep.
 
     Args:
-        maintenance_actions: Agent 1 maintenance decisions this step
-        ordering_cost:       Total consumable ordering cost (before δ weighting)
-        machine_states:      Post-tick machine states
-        eta_values:          Weibull η per machine (for RUL normalisation)
-        shared_reward:       R_shared_t (criticality-weighted failure penalty)
-        weights:             Reward weight coefficients from reward_weights.yaml
+        maintenance_actions:  Actions taken this step
+        ordering_cost:        Cost of reorder actions
+        machine_states:       Post-tick machine states
+        prev_ruls:            RUL values before this step (for ΔRUL)
+        consumable_inventory: Current inventory [n_consumable]
+        shared_reward:        R_shared_t (failure penalty)
+        weights:              Reward weight dict from reward_weights.yaml
 
     Returns:
-        r1_t scalar
+        r1 scalar
     """
-    c_PM        = weights.get("c_PM", 1.0)
-    c_CM        = weights.get("c_CM", 3.0)
-    delta_obj   = weights.get("delta_obj", 0.5)
-    w_avail     = weights.get("w_avail", 2.0)
-    w_RUL       = weights.get("w_RUL", 0.5)
-    rul_thresh  = weights.get("rul_threshold", 0.3)
-    lam         = weights.get("lambda_shared", 0.3)
+    c_PM    = weights.get("c_PM",    1.0)
+    c_CM    = weights.get("c_CM",    7.0)
+    delta   = weights.get("delta",   0.5)
+    w_RUL   = weights.get("w_RUL",   0.05)
+    w_avail = weights.get("w_avail", 2.0)
+    w_hold  = weights.get("w_hold",  0.005)
+    lam     = weights.get("lambda_shared", 0.3)
 
-    # Maintenance action costs
-    maint_cost = 0.0
-    for action in maintenance_actions:
-        if action == 1:    maint_cost += c_PM
-        elif action == 2:  maint_cost += c_CM
+    # --- Maintenance action costs ---
+    n_PM = sum(1 for a in maintenance_actions if a == 1)
+    n_CM = sum(1 for a in maintenance_actions if a == 2)
+    maint_cost = -(c_PM * n_PM + c_CM * n_CM)
 
-    # Resource ordering cost (δ-weighted per eq. 3.14)
-    resource_cost = delta_obj * ordering_cost
+    # --- Ordering cost ---
+    order_cost = -delta * ordering_cost
 
-    # Dense availability bonus (every step)
-    avail_bonus = w_avail * compute_system_availability(machine_states)
+    # --- ΔRUL dense signal ---
+    # Positive when PM/CM happened (RUL increased)
+    # Negative when machines aged without maintenance
+    if prev_ruls is not None and len(prev_ruls) == len(machine_states):
+        curr_ruls = [estimate_rul(s) for s in machine_states]
+        delta_rul = sum(
+            curr - prev
+            for curr, prev in zip(curr_ruls, prev_ruls)
+        )
+        rul_reward = w_RUL * delta_rul
+    else:
+        rul_reward = 0.0
 
-    # Dense RUL preservation bonus (every step) — NEW
-    # Ties reward to Weibull reliability: preserve RUL = stay in useful-life phase
-    rul_bonus = w_RUL * compute_rul_bonus(machine_states, eta_values, rul_thresh)
+    # --- Availability signal (fraction of OP machines) ---
+    n_op     = sum(1 for s in machine_states if s.status == MachineStatus.OP)
+    avail_r  = w_avail * (n_op / max(len(machine_states), 1))
 
-    r1 = -maint_cost - resource_cost + avail_bonus + rul_bonus + lam * shared_reward
+    # --- Holding cost ---
+    if consumable_inventory is not None:
+        hold_cost = -w_hold * sum(max(inv, 0.0) for inv in consumable_inventory)
+    else:
+        hold_cost = 0.0
+
+    r1 = maint_cost + order_cost + rul_reward + avail_r + hold_cost + lam * shared_reward
+
     return float(r1)

@@ -1,3 +1,4 @@
 # configs/phase2.yaml
-# Phase 2: Phase 1 + LogNormal processing times + Beta repair effectiveness.
+# ====================
+# Phase 2: Phase 1 + LogNormal processing time noise + Beta repair effectiveness noise.
 stochasticity_level: 2

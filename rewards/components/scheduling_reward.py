@@ -1,115 +1,106 @@
-from __future__ import annotations
 """
 rewards/components/scheduling_reward.py
-=========================================
-Agent 2 (Job Shop) reward — aligned with report objective eq. 3.14.
+==========================================
+Agent 2 reward: tardiness + completion + slack + health-aware dispatch.
 
-r2_t = −α · Σwⱼ·max(0, Cⱼ−dⱼ) / T_max   [normalised weighted tardiness]
-       −β · Cmax_est / T_max               [running makespan estimate — NEW]
-       +w_comp · completions_this_step      [DENSE completion bonus]
-       +w_health · health_assigned_mach     [DENSE health-aware dispatch bonus]
-       +λ · R_shared_t                     [shared failure penalty]
+KEY REDESIGN (Phase 2):
+    OLD: -w_tard * total_tardiness / T_max  (sparse — only fires at completion)
+    NEW: -w_tard * delta_tardiness_risk      (dense projected tardiness)
+         + w_slack * n_on_track / J          (fraction of jobs with positive slack)
 
-Makespan estimate: rather than waiting for episode end (sparse),
-we use estimated_Cmax = max over active jobs of (estimated_completion_time).
-Small β keeps this from dominating tardiness.
+    delta_tardiness_risk = change in (tardiness + projected_excess) this step.
+    This fires every step based on how at-risk the schedule looks.
+
+r2_t = -w_tard * sum_j(w_j * max(0, C_j - d_j)) / T_max  [completed jobs]
+       - w_tard * 0.1 * projected_tardiness                 [at-risk jobs, dense]
+       + w_slack * n_on_track / J                           [DENSE slack signal]
+       + w_comp * n_completions_this_step                   [DENSE completion]
+       + w_health * health_assigned_machine / 100           [DENSE health bonus]
+       + lambda * R_shared
 """
 
+from typing import List, Optional, Tuple
 import numpy as np
-from typing import List, Tuple, Optional
-from environments.transitions.job_dynamics import Job
+
+from environments.transitions.job_dynamics import Job, OpStatus
 from environments.transitions.degradation import MachineState
 
 
-def estimate_makespan(
-    jobs:         List[Job],
-    current_step: int,
-) -> float:
-    """
-    Running estimate of Cmax — maximum expected completion time.
-
-    For completed jobs: use actual completion_time.
-    For active jobs: estimate = current_step + remaining_ops * avg_proc_time.
-    For pending jobs not started: estimate = due_date (conservative).
-
-    Returns normalised estimate (raw step count, caller divides by T_max).
-    """
-    max_completion = 0.0
-
-    for job in jobs:
-        if job.completion_time is not None:
-            # Already done — use actual
-            max_completion = max(max_completion, job.completion_time)
-        else:
-            # Estimate remaining time
-            n_remaining = sum(1 for op in job.operations if op.status in (0, 1, 2))
-            # Rough average: 1 op takes ~1-2 shifts
-            est_done = current_step + n_remaining * 1.5
-            max_completion = max(max_completion, est_done)
-
-    return float(max_completion)
-
-
 def compute_scheduling_reward(
-    jobs:                List[Job],
-    completed_job_ids:   List[int],
-    assignment:          Optional[Tuple[int, int, int]],
-    machine_states:      List[MachineState],
-    shared_reward:       float,
-    t_max:               int,
-    current_step:        int,
-    weights:             dict,
+    jobs:              List[Job],
+    completed_job_ids: List[int],
+    assignment:        Optional[Tuple[int, int, int]],  # (job_id, op_idx, machine_id) or None
+    machine_states:    List[MachineState],
+    shared_reward:     float,
+    current_time:      float,
+    t_max:             int,
+    weights:           dict,
 ) -> float:
     """
-    Computes Agent 2's reward — aligned with eq. 3.14.
+    Computes Agent 2's reward for one timestep.
 
     Args:
-        jobs:              All jobs (active + done)
-        completed_job_ids: Jobs completed THIS step (for completion bonus)
-        assignment:        Agent 2's action — (job_id, op_idx, machine_id) or None
-        machine_states:    Post-tick machine states
-        shared_reward:     R_shared_t (criticality-weighted)
-        t_max:             Episode length for normalisation
-        current_step:      Current timestep (for makespan estimate)
-        weights:           From reward_weights.yaml
+        jobs:              All active jobs (including completed)
+        completed_job_ids: Jobs finished this step
+        assignment:        Agent 2's action — (j,k,m) or None (WAIT)
+        machine_states:    Post-tick states (for health bonus)
+        shared_reward:     R_shared_t
+        current_time:      Current timestep
+        t_max:             Episode length
+        weights:           Reward weight dict
 
     Returns:
-        r2_t scalar
+        r2 scalar
     """
-    alpha         = weights.get("alpha", 1.0)
-    w_tard        = weights.get("w_tard", 5.0)
-    beta_makespan = weights.get("beta_makespan", 0.2)
-    w_comp        = weights.get("w_comp", 3.0)
-    w_health      = weights.get("w_health", 0.5)
-    lam           = weights.get("lambda_shared", 0.3)
+    w_tard   = weights.get("w_tard",   5.0)
+    w_comp   = weights.get("w_comp",   3.0)
+    w_health = weights.get("w_health", 0.5)
+    w_slack  = weights.get("w_slack",  0.2)
+    lam      = weights.get("lambda_shared", 0.3)
 
-    # ── Normalised weighted tardiness (α-weighted, eq. 3.14) ──────────────
-    # Only count jobs that have already completed — running jobs don't have
-    # final tardiness yet. Prevents penalising jobs still in progress.
-    completed_jobs = [j for j in jobs if j.completion_time is not None]
-    total_tardiness = sum(
-        j.weight * max(0.0, j.completion_time - j.due_date)
-        for j in completed_jobs
+    # --- Actual tardiness (completed jobs only) ---
+    total_tard = sum(
+        job.weight * job.tardiness
+        for job in jobs
+        if job.completion_time is not None
     )
-    tard_penalty = -alpha * w_tard * total_tardiness / max(t_max, 1)
+    tard_penalty = -w_tard * total_tard / max(t_max, 1)
 
-    # ── Running makespan estimate penalty (β-weighted, eq. 3.14) ──────────
-    # Small β so it doesn't dominate tardiness — guides Agent 2 toward
-    # minimising global span not just individual tardiness.
-    cmax_est     = estimate_makespan(jobs, current_step)
-    make_penalty = -beta_makespan * cmax_est / max(t_max, 1)
+    # --- Projected tardiness (at-risk active jobs) ---
+    # Dense signal: penalise jobs whose remaining work > remaining time
+    projected = 0.0
+    active_jobs = [j for j in jobs if not j.is_complete]
+    n_jobs = max(len(active_jobs), 1)
+    n_on_track = 0
 
-    # ── Completion bonus (dense — fires when a job finishes this step) ─────
+    for job in active_jobs:
+        remaining_work = sum(
+            min(op.nominal_proc_times.values()) if op.nominal_proc_times else 2.0
+            for op in job.operations
+            if op.status in (OpStatus.PENDING, OpStatus.READY, OpStatus.IN_PROGRESS)
+        )
+        time_left = job.due_date - current_time
+        excess = max(remaining_work - time_left, 0.0)
+        projected += job.weight * excess / max(t_max, 1)
+
+        if excess <= 0:
+            n_on_track += 1
+
+    projected_penalty = -w_tard * 0.1 * projected
+
+    # --- Slack signal: fraction of jobs currently on track ---
+    slack_reward = w_slack * (n_on_track / n_jobs)
+
+    # --- Completion bonus ---
     comp_bonus = w_comp * len(completed_job_ids)
 
-    # ── Health-aware dispatch bonus (dense — fires on every assignment) ────
-    # Rewards Agent 2 for preferring healthy machines → cooperative with Agent 1.
+    # --- Health-aware dispatch bonus ---
     health_bonus = 0.0
     if assignment is not None:
         _, _, machine_id = assignment
         if machine_id < len(machine_states):
-            health_norm  = machine_states[machine_id].health / 100.0
-            health_bonus = w_health * health_norm
+            health_bonus = w_health * (machine_states[machine_id].health / 100.0)
 
-    r2 = tard_penalty + make_penalty + comp_bonus + health_bonus + lam * shared_reward
+    r2 = tard_penalty + projected_penalty + slack_reward + comp_bonus + health_bonus + lam * shared_reward
+
     return float(r2)

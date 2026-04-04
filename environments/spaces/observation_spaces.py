@@ -1,76 +1,61 @@
 """
 environments/spaces/observation_spaces.py
-==========================================
-Defines observation space dimensions for both agents.
+===========================================
+Observation space dimension constants.
+All observation arrays are built from these constants — single source of truth.
 
-Agent 1 (PDM): flat vector
-    Per-machine features (15 * n_machines)
-    + resource state (n_renewable + n_consumable * (1 + max_lead_time))
-    + job summary (5 aggregate stats)
-
-Agent 2 (Job Shop): HeteroData graph
-    Node feature dims are defined here; graph structure in graph_builder.py
-
-These dims must stay consistent with:
-    - MachineState.to_feature_vector()  -> 15 dims
-    - ResourceState.to_flat_vector()    -> computed from config
-    - Operation.to_feature_vector()     -> 10 dims
-    - Job.to_feature_vector()           -> 7 dims
+CHANGE LOG:
+    Phase 0: MACHINE_FEATURE_DIM 15->15 (same count but features changed)
+             H is now Weibull survival, hazard_rate is feature [4]
+    Phase 1: OP_FEATURE_DIM unchanged at 10
+             JOB_FEATURE_DIM unchanged at 7
 """
 
-from typing import Dict, Tuple
+# Node feature dimensions (must match to_feature_vector() implementations)
+MACHINE_FEATURE_DIM = 15   # degradation.py MachineState.to_feature_vector()
+OP_FEATURE_DIM      = 10   # job_dynamics.py Operation.to_feature_vector()
+JOB_FEATURE_DIM     = 7    # job_dynamics.py Job.to_feature_vector()
+
+# Agent 1 flat observation structure:
+#   [machine_features (15 * n_machines),
+#    resource_renewable (n_renewable * 2),      [available, capacity]
+#    resource_consumable (n_consumable * 2),     [inventory, pipeline_sum]
+#    resource_pipeline (n_consumable * max_lead_time),
+#    job_summary (6 stats)]
+JOB_SUMMARY_DIM = 6
 
 
-# Node feature dimensions for TGIN (Table 3.9 in report)
-OP_FEATURE_DIM      = 10
-MACHINE_FEATURE_DIM = 15
-JOB_FEATURE_DIM     = 7
-
-# Edge feature dimensions (Table 3.10 in report)
-EDGE_OP_MACH_DIM    = 2   # (processing_time_norm, compatibility_score)
-EDGE_MACH_JOB_DIM   = 2   # (progress_pct, est_completion_time)
-EDGE_OP_JOB_DIM     = 2   # (precedence_position, is_ready_flag)
-
-
-def compute_agent1_obs_dim(config: dict) -> int:
+def compute_agent1_obs_dim(config_or_n_machines, n_renewable=None, n_consumable=None, max_lead_time=None) -> int:
     """
-    Computes flat observation dimension for Agent 1.
+    Computes Agent 1's flat observation vector dimension.
 
-    Args:
-        config: Full config dict
+    Accepts either:
+        compute_agent1_obs_dim(config_dict)                          # preferred
+        compute_agent1_obs_dim(n_machines, n_renewable, n_consumable, max_lead_time)  # legacy
 
     Returns:
-        Integer dimension of Agent 1's observation vector
+        Total observation dimension
     """
-    n_machines  = len(config.get("machines", []))
-    machine_dim = MACHINE_FEATURE_DIM * n_machines
+    # Accept config dict (new calling convention from mfg_env.py)
+    # OR accept 4 explicit ints (legacy calling convention from mlp_policy.py)
+    if isinstance(config_or_n_machines, dict):
+        config = config_or_n_machines
+        n_machines   = len(config.get("machines", []))
+        res_cfg      = config.get("resources", {})
+        n_renewable  = len(res_cfg.get("renewable", []))
+        n_consumable = len(res_cfg.get("consumable", []))
+        max_lead_time = max(
+            (r.get("lead_time_shifts", 5) for r in res_cfg.get("consumable", [])),
+            default=7
+        )
+    else:
+        n_machines = config_or_n_machines
+        # n_renewable, n_consumable, max_lead_time passed explicitly
 
-    ren_cfgs = config["resources"]["renewable"]
-    con_cfgs = config["resources"]["consumable"]
-    n_ren    = len(ren_cfgs)
-    n_con    = len(con_cfgs)
-    max_lead = max(r["lead_time_shifts"] for r in con_cfgs)
+    machine_dim  = MACHINE_FEATURE_DIM * n_machines
+    resource_ren = n_renewable * 2
+    resource_con = n_consumable * 2
+    pipeline_dim = n_consumable * max_lead_time
+    job_dim      = JOB_SUMMARY_DIM
 
-    # resource_dim = n_ren (available) + n_con (inventory) + n_con*max_lead (pipeline)
-    resource_dim = n_ren + n_con * (1 + max_lead)
-
-    # Job summary: 5 aggregate stats
-    # [n_jobs_active, n_jobs_at_risk, avg_completion_ratio, avg_slack, n_ready_ops]
-    job_summary_dim = 5
-
-    return machine_dim + resource_dim + job_summary_dim
-
-
-def compute_agent1_action_dim(config: dict) -> Tuple[int, int]:
-    """
-    Returns (maintenance_action_dim, reorder_action_dim) for Agent 1.
-
-    maintenance_action_dim: n_machines * 3 (none/PM/CM per machine)
-    reorder_action_dim:     n_consumable (quantity per resource)
-
-    Returns:
-        (maintenance_dim, reorder_dim)
-    """
-    n_machines = len(config.get("machines", []))
-    n_con      = len(config["resources"]["consumable"])
-    return n_machines * 3, n_con
+    return machine_dim + resource_ren + resource_con + pipeline_dim + job_dim

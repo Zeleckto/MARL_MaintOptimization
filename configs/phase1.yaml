@@ -1,8 +1,5 @@
 # configs/phase1.yaml
-# Phase 1: Weibull failures only. Fixed processing times, batch jobs at t=0.
-# Use this to validate basic learning signal before adding noise.
-
+# ====================
+# Phase 1: Weibull failures only. Deterministic processing times. Batch jobs at t=0.
+# Override only stochasticity_level on top of base.yaml.
 stochasticity_level: 1
-
-# Inherit all other settings from base.yaml
-# In train.py, load base.yaml first then override with this file.

@@ -1,190 +1,280 @@
 # configs/base.yaml
-# =================
-# Master configuration. All other phase configs inherit from this.
-# Change values here to affect all phases unless overridden in phase configs.
+# ==================
+# Ground-truth configuration for Phase 1 training.
+# All Weibull parameters, resource values, and reward weights are here.
+# Phase configs (phase1.yaml etc.) only override stochasticity_level.
+#
+# MACHINE TYPES:
+#   Type A: CNC Mill  (x2) — bearing-dominated, beta=2.5, wear-out dominant
+#   Type B: Lathe     (x1) — moderate wear-out,  beta=2.0
+#   Type C: Grinder   (x1) — cutting tool wear,  beta=3.0, highly predictable
+#   Type D: Press     (x1) — hydraulic/fatigue,  beta=1.8, semi-random
+#
+# BETA RANGE:   1.5 – 3.5  (higher = more predictable wear-out)
+# ETA RANGE:    80 – 160 shifts  (lower = more failures per episode)
+# Target: 2-3 PM events per machine per 150-shift episode.
+#
+# OPERATION TYPES (7 types, ~43% average machine flexibility):
+#   Milling   -> M0,M1,M2  (60%)
+#   Drilling  -> M0,M1,M4  (60%)
+#   Turning   -> M2,M3     (40%)
+#   Grinding  -> M3        (20%)
+#   Boring    -> M0,M1,M2  (60%)
+#   Finishing -> M2,M3     (40%)
+#   Pressing  -> M4        (20%)
+#   Average = 15/35 = 42.86% ≈ 43%  [Brandimarte mk01 range]
+#
+# CHECKPOINT: Do NOT load old checkpoint. Obs dims changed.
+# Start fresh with entropy_coef=0.05 to prevent entropy collapse.
 
-# ─── Reproducibility ──────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# EPISODE
+# ---------------------------------------------------------------------------
+episode:
+  t_max_train:  150     # shifts (= 1200 simulated hours)
+  t_max_eval:   300     # longer for evaluation
+  dt_hours:     8.0     # hours per shift
+
+stochasticity_level: 1  # 1=Weibull only, 2=+LogNormal, 3=+Poisson arrivals
 seed: 42
 
-# ─── Stochasticity phase (overridden in phase1/2/3.yaml) ──────────────────
-# 1 = Weibull failures only
-# 2 = Phase 1 + LogNormal proc times, Beta repair effectiveness
-# 3 = Phase 2 + Poisson arrivals, LogNormal lead times
-stochasticity_level: 1
-
-# ─── Environment ──────────────────────────────────────────────────────────
-environment:
-  n_parallel_envs: 4            # parallel CPU environments for rollout collection
-  max_jobs_in_system: 30        # cap on simultaneous jobs (Phase 3 Poisson guard)
-
-# ─── Episode ──────────────────────────────────────────────────────────────
-episode:
-  t_max_train: 200              # timesteps per training episode
-  t_max_eval: 500               # timesteps per evaluation episode
-  dt_hours: 8.0                 # hours per timestep (1 shift)
-
-# ─── Degradation (Weibull + Kijima) ───────────────────────────────────────
-degradation:
-  dt_hours: 8.0                 # must match episode.dt_hours
-  q_fixed: 0.5                  # Phase 1: fixed repair effectiveness
-  alpha_q: 5.0                  # Phase 2+: Beta distribution alpha
-  beta_q: 5.0                   # Phase 2+: Beta distribution beta
-
-# ─── Machines (M=5 benchmark instance) ────────────────────────────────────
-# beta, eta in hours. delta_h in health units per operating shift.
-# h_restore values are rough guides — Kijima q modulates actual restoration.
+# ---------------------------------------------------------------------------
+# MACHINES — 5 machines, 4 types (A,B,C,D)
+# ---------------------------------------------------------------------------
+# Weibull scale: H = 100 * exp(-(effective_age / eta)^beta)
+# effective_age = virtual_age + time_since_last_maint
+# NO delta_h  (health is a function, not a counter)
+# NO h_PM_threshold  (agent discovers optimal timing from costs)
+#
+# Repair durations are in shifts (1 shift = 8h):
+#   tau_PM_shifts: duration of planned maintenance
+#   tau_CM_shifts: duration of corrective maintenance
+#   q_PM: Kijima repair effectiveness PM  (0=perfect, 1=minimal)
+#   q_CM: Kijima repair effectiveness CM  (0=perfect, 1=minimal)
+#   h_critical: health below which failure prob spikes — for reward shaping only
+# ---------------------------------------------------------------------------
 machines:
-  - machine_id: 0
-    name: "CNC Mill"
-    beta: 2.8
-    eta: 3000.0
-    delta_h: 0.5            # loses 0.5 health per shift => fails ~200 shifts naturally
-    h_PM_threshold: 40.0
-    h_critical: 10.0
+  - machine_id:   0
+    name:         "CNC Mill 1"
+    machine_type: "A"
+    beta:         2.5          # wear-out dominant  [range: 1.5–3.5]
+    eta:          120          # characteristic life [range: 80–160 shifts]
     tau_PM_shifts: 3
     tau_CM_shifts: 8
-    h_restore_PM: 30.0
-    h_restore_CM: 60.0
+    q_PM:         0.4          # PM restores ~60% of age reduction
+    q_CM:         0.2          # CM more thorough (closer to perfect)
+    h_critical:   15.0         # used only for reward signal, NOT threshold
 
-  - machine_id: 1
-    name: "Lathe"
-    beta: 2.2
-    eta: 2500.0
-    delta_h: 0.55
-    h_PM_threshold: 40.0
-    h_critical: 10.0
+  - machine_id:   1
+    name:         "CNC Mill 2"
+    machine_type: "A"
+    beta:         2.5
+    eta:          120
+    tau_PM_shifts: 3
+    tau_CM_shifts: 8
+    q_PM:         0.4
+    q_CM:         0.2
+    h_critical:   15.0
+
+  - machine_id:   2
+    name:         "Lathe"
+    machine_type: "B"
+    beta:         2.0          # moderate wear-out  [range: 1.5–3.5]
+    eta:          100          # shorter life       [range: 80–160 shifts]
     tau_PM_shifts: 2
     tau_CM_shifts: 6
-    h_restore_PM: 28.0
-    h_restore_CM: 55.0
+    q_PM:         0.45
+    q_CM:         0.25
+    h_critical:   15.0
 
-  - machine_id: 2
-    name: "Press"
-    beta: 1.8
-    eta: 2000.0
-    delta_h: 0.7             # degrades fastest — will fail within 200-step episode
-    h_PM_threshold: 45.0
-    h_critical: 10.0
+  - machine_id:   3
+    name:         "Grinder"
+    machine_type: "C"
+    beta:         3.0          # strong wear-out, predictable  [range: 1.5–3.5]
+    eta:          140          # long life            [range: 80–160 shifts]
     tau_PM_shifts: 4
     tau_CM_shifts: 10
-    h_restore_PM: 35.0
-    h_restore_CM: 65.0
+    q_PM:         0.35
+    q_CM:         0.15
+    h_critical:   15.0
 
-  - machine_id: 3
-    name: "Grinder"
-    beta: 3.2
-    eta: 1800.0
-    delta_h: 0.8             # heavy wear-out
-    h_PM_threshold: 50.0
-    h_critical: 10.0
+  - machine_id:   4
+    name:         "Press"
+    machine_type: "D"
+    beta:         1.8          # semi-random (hydraulic)  [range: 1.5–3.5]
+    eta:          90           # shortest life            [range: 80–160 shifts]
     tau_PM_shifts: 3
-    tau_CM_shifts: 8
-    h_restore_PM: 40.0
-    h_restore_CM: 70.0
+    tau_CM_shifts: 9
+    q_PM:         0.5
+    q_CM:         0.3
+    h_critical:   15.0
 
-  - machine_id: 4
-    name: "Drill"
-    beta: 1.5
-    eta: 3500.0
-    delta_h: 0.4             # slow degradation, near-random failures
-    h_PM_threshold: 35.0
-    h_critical: 10.0
-    tau_PM_shifts: 2
-    tau_CM_shifts: 5
-    h_restore_PM: 25.0
-    h_restore_CM: 50.0
+# ---------------------------------------------------------------------------
+# OPERATION TYPES — 7 types, 43% average machine flexibility
+# eligible_machine_types lists which machine TYPES can perform this operation.
+# The engine maps type -> machine_ids automatically.
+#
+# Processing times (shifts) vary by machine type.
+# Format: proc_time_by_type: {machine_type: [min, max]}
+# Sampled uniformly per job at generation time.
+# ---------------------------------------------------------------------------
+operation_types:
+  - op_type:    "Milling"
+    eligible_machine_types: ["A", "B"]          # M0,M1,M2 — 3/5 = 60%
+    proc_time_by_type:
+      A: [2, 6]     # CNC mills are fast
+      B: [3, 8]     # Lathe is slower for milling
 
-# ─── Resources (R=6 types) ────────────────────────────────────────────────
+  - op_type:    "Drilling"
+    eligible_machine_types: ["A", "D"]          # M0,M1,M4 — 3/5 = 60%
+    proc_time_by_type:
+      A: [1, 4]
+      D: [2, 5]
+
+  - op_type:    "Turning"
+    eligible_machine_types: ["B", "C"]          # M2,M3 — 2/5 = 40%
+    proc_time_by_type:
+      B: [3, 7]
+      C: [4, 8]
+
+  - op_type:    "Grinding"
+    eligible_machine_types: ["C"]               # M3 only — 1/5 = 20%
+    proc_time_by_type:
+      C: [3, 7]
+
+  - op_type:    "Boring"
+    eligible_machine_types: ["A", "B"]          # M0,M1,M2 — 3/5 = 60%
+    proc_time_by_type:
+      A: [2, 5]
+      B: [3, 7]
+
+  - op_type:    "Finishing"
+    eligible_machine_types: ["B", "C"]          # M2,M3 — 2/5 = 40%
+    proc_time_by_type:
+      B: [2, 5]
+      C: [2, 5]
+
+  - op_type:    "Pressing"
+    eligible_machine_types: ["D"]               # M4 only — 1/5 = 20%
+    proc_time_by_type:
+      D: [2, 6]
+
+# ---------------------------------------------------------------------------
+# JOBS
+# ---------------------------------------------------------------------------
+jobs:
+  n_jobs_train:      40        # J=40 (was 20 — garbage)
+  n_jobs_eval:       40
+  n_ops_per_job_min: 3         # Y_avg = 4 ops/job
+  n_ops_per_job_max: 5
+  due_date_factor:   1.5       # d_j = t_arrival + factor * sum(min_proc_times)
+  weight_choices:    [1, 2, 3] # job priority weights
+  lambda_arr:        0.25      # Phase 3 Poisson arrival rate (arrivals/shift)
+
+# ---------------------------------------------------------------------------
+# RESOURCES — 3 renewable + 3 consumable
+# EOQ-grounded: Q* = sqrt(2*D*S / h_c) where D=46/ep, S=8, h_c=0.75 => Q~8
+# ---------------------------------------------------------------------------
 resources:
   renewable:
     - resource_id: 0
       name: "Technicians"
-      capacity: 3              # K_r: max simultaneous technicians
+      capacity: 2           # concurrent maintenance ops
 
     - resource_id: 1
-      name: "Tools"
-      capacity: 4
-
-    - resource_id: 2
       name: "Maintenance Bays"
-      capacity: 2
+      capacity: 1           # bottleneck resource
 
   consumable:
-    - resource_id: 3
+    - resource_id: 2
       name: "Spare Parts"
-      initial_inventory: 20
-      lead_time_shifts: 5       # L_r: replenishment lead time in timesteps
-      reorder_cost: 10.0
+      initial_inventory: 10   # starts at ROP + 1 safety batch
+      lead_time_shifts:   5   # 40 simulated hours
+      reorder_cost:       1.0 # unit ordering cost (normalized)
+      holding_cost:       0.05
+      per_PM:             3   # units consumed per PM event
+      per_CM:             8   # units consumed per CM event
+      reorder_qty:        8   # Q* = 8 (EOQ)
+      reorder_point:      5   # ROP (95% service level)
+
+    - resource_id: 3
+      name: "Lubricants"
+      initial_inventory: 8
+      lead_time_shifts:   3
+      reorder_cost:       0.5
+      holding_cost:       0.03
+      per_PM:             1
+      per_CM:             2
+      reorder_qty:        5
+      reorder_point:      3
 
     - resource_id: 4
-      name: "Lubricants"
-      initial_inventory: 15
-      lead_time_shifts: 3
-      reorder_cost: 5.0
-
-    - resource_id: 5
       name: "Consumable Tools"
       initial_inventory: 10
-      lead_time_shifts: 4
-      reorder_cost: 8.0
+      lead_time_shifts:   7
+      reorder_cost:       1.2
+      holding_cost:       0.06
+      per_PM:             2
+      per_CM:             4
+      reorder_qty:        6
+      reorder_point:      4
 
-# ─── Reward weights ───────────────────────────────────────────────────────
-# Stored here AND in rewards/reward_weights.yaml (yaml wins if both exist)
-reward:
-  c_fail: 30.0
-  c_PM: 1.0
-  c_CM: 3.0
-  w_avail: 2.0
-  w_tard: 5.0
-  w_comp: 3.0
-  w_health: 0.5
-  lambda_shared: 0.3           # coupling strength of shared failure penalty
+# Resource consumption by machine type (overrides defaults if present)
+# Format: [Spare Parts, Lubricants, Consumable Tools]
+resource_requirements:
+  PM:  [3, 1, 2]   # per PM event (all machine types)
+  CM:  [8, 2, 4]   # per CM event
+  renewable_PM: [1, 1]   # [technicians, bays] per PM
+  renewable_CM: [2, 1]   # [technicians, bays] per CM
 
-# ─── MAPPO Hyperparameters (Table B.1 from report) ────────────────────────
-mappo:
-  lr_actor1: 0.0001            # Agent 1 (MLP) — lower lr, converges faster
-  lr_actor2: 0.0003            # Agent 2 (TGIN) — higher lr, slower convergence
-  lr_critic: 0.001
-  gamma: 0.99
-  gae_lambda: 0.95
-  clip_eps: 0.2
-  entropy_coef: 0.01
-  value_loss_coef: 0.5
-  max_grad_norm: 0.5
-  rollout_steps: 2048          # steps collected before each PPO update
-  ppo_epochs: 10
-  minibatch_size: 64
-
-# ─── TGIN Architecture ────────────────────────────────────────────────────
-tgin:
-  n_layers: 3                  # L: number of message passing rounds
-  hidden_dim: 256
-  eps: 0.0                     # GIN epsilon (learnable if set to null)
-  op_feature_dim: 10
-  machine_feature_dim: 15
-  job_feature_dim: 7
-
-# ─── Agent 1 MLP ──────────────────────────────────────────────────────────
-mlp_policy:
-  hidden_dims: [256, 256]
-
-# ─── Critic ───────────────────────────────────────────────────────────────
-critic:
-  hidden_dims: [512, 256]
-
-# ─── Job Parameters (Phase 1: batch at episode start) ─────────────────────
-jobs:
-  n_jobs_train: 20             # jobs released at episode start in Phase 1+2
-  n_ops_per_job_min: 2
-  n_ops_per_job_max: 5
-  lambda_arr: 0.5              # Phase 3 only: Poisson arrival rate (jobs/shift)
-
-# ─── Processing time noise (Phase 2+) ─────────────────────────────────────
+# ---------------------------------------------------------------------------
+# PROCESSING NOISE (Phase 2+)
+# ---------------------------------------------------------------------------
 processing:
-  sigma_log: 0.15              # log-space std deviation for LogNormal noise
+  sigma_log:  0.15    # LogNormal std for processing time noise (Phase 2)
+  sigma_repair: 0.1   # Beta std for repair effectiveness noise (Phase 2)
 
-# ─── Logging ──────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# MAPPO HYPERPARAMETERS
+# entropy_coef=0.05 (5x higher than before) prevents entropy collapse on fresh init
+# ---------------------------------------------------------------------------
+mappo:
+  gamma:              0.99
+  gae_lambda:         0.95
+  clip_eps:           0.2
+  entropy_coef:       0.05    # HIGH — prevents collapse on random init (was 0.01)
+  value_loss_coef:    0.5
+  max_grad_norm:      0.5
+  lr_actor1:          1.0e-4
+  lr_actor2:          3.0e-4
+  lr_critic:          1.0e-4
+  rollout_steps:      2048
+  ppo_epochs:         5
+  minibatch_size:     256
+  normalize_advantages: true
+
+# ---------------------------------------------------------------------------
+# MODEL ARCHITECTURE
+# ---------------------------------------------------------------------------
+tgin:
+  hidden_dim:   128
+  n_layers:     3
+  dropout:      0.1
+
+mlp:
+  hidden_dims:  [256, 256]
+  activation:   "relu"
+
+critic:
+  hidden_dims:  [512, 256]
+
+# ---------------------------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------------------------
 logging:
-  tensorboard_dir: "runs/"
-  checkpoint_dir: "checkpoints/"
+  tensorboard_dir:      "runs/"
+  checkpoint_dir:       "checkpoints/"
   log_every_n_episodes: 10
+  checkpoint_every_n_steps: 50000
+
+device: "cuda"

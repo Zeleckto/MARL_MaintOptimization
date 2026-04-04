@@ -1,37 +1,47 @@
 # rewards/reward_weights.yaml
 # ============================
-# All reward coefficients in one place.
-# Never hardcode these in Python.
-# Edit here to retune without touching any .py files.
+# All reward coefficients in ONE place.
+# Literature basis:
+#   c_PM:c_CM:c_fail = 1:7:25
+#   c_CM = 7 justified: break-even > c_PM / P(fail) = 1/0.162 = 6.17
+#   c_fail = 25: 15-40x PM cost typical for discrete manufacturing
+#   (Pintelon & Parodi-Herz 2008, Nakagawa 2005)
 #
-# Cost hierarchy (industrial standard):
-#   c_fail >> c_CM > c_PM
-#   Bottleneck failure multiplier applied on top via criticality weighting.
+# ΔRUL calibration: w_RUL = 0.05 so PM reward ≈ PM cost
+#   0.05 * 35_shifts_of_RUL = 1.75 ≈ c_PM = 1.0  ✓
+#
+# Holding cost: w_hold = 0.005 (consistent with EOQ theory)
 
-# ── Failure penalty ────────────────────────────────────────────────────────
-c_fail: 30.0               # base failure cost
-criticality_multiplier: 5.0  # bottleneck machine failure costs (1 + 5*crit) * c_fail
-lambda_shared: 0.3         # fraction of R_shared each agent receives
+# --- Maintenance costs (Agent 1) ---
+c_PM:   1.0     # cost per PM action
+c_CM:   7.0     # cost per CM action  (7x PM — literature grounded)
+c_fail: 25.0    # cost per FAILURE    (25x PM — unplanned downtime)
 
-# ── Agent 1 (PDM) costs ────────────────────────────────────────────────────
-c_PM: 1.0                  # cost per PM action (lowest — proactive is cheap)
-c_CM: 3.0                  # cost per CM action (reactive is expensive)
-delta_obj: 0.5             # weight on resource ordering cost (eq. 3.14 δ)
+# --- Ordering cost ---
+delta:  0.5     # per-unit ordering cost multiplier
 
-# ── Agent 1 dense bonuses ──────────────────────────────────────────────────
-w_avail: 2.0               # system availability bonus per step
-w_RUL: 0.5                 # RUL preservation bonus (new — ties reward to Weibull reliability)
-# RUL bonus fires when mean_RUL / eta_mean > threshold
-rul_threshold: 0.3         # below this fraction of eta, no RUL bonus
+# --- Inventory holding cost ---
+w_hold: 0.005   # per unit per step (prevents over-ordering)
 
-# ── Agent 2 (Job Shop) weights ─────────────────────────────────────────────
-alpha: 1.0                 # tardiness weight (eq. 3.14 α)
-w_tard: 5.0                # scales normalised tardiness penalty
-w_comp: 3.0                # job completion bonus per job finished this step
-w_health: 0.5              # health-aware dispatch bonus per assignment
-beta_makespan: 0.2         # running makespan estimate penalty (eq. 3.14 β, small)
+# --- ΔRUL signal (Agent 1 dense reward) ---
+# Fires every step: reward = w_RUL * (RUL_{t+1} - RUL_t) for each machine
+# This gives Agent 1 a continuous signal toward preventive behavior.
+w_RUL:  0.05
 
-# ── Objective scalarisation (for paper reporting, eq. 3.14) ───────────────
-# These mirror alpha/beta/gamma/delta in the report objective.
-# Not used in reward computation directly — used in benchmarks/metrics.py
-gamma_obj: 1.0             # maintenance cost weight
+# --- System availability (Agent 1) ---
+# w_avail fires every step based on fraction of OP machines
+w_avail: 2.0
+
+# --- Scheduling (Agent 2) ---
+w_tard:   5.0   # weighted tardiness penalty coefficient
+w_comp:   3.0   # completion bonus per job finished this step
+w_health: 0.5   # health-aware dispatch bonus (prefer healthy machines)
+w_slack:  0.2   # on-track bonus (ops with positive slack)
+
+# --- Shared failure penalty ---
+lambda_shared: 0.3   # fraction of R_shared credited to each agent
+
+# --- Objective weights for metrics (not training rewards) ---
+alpha:     1.0    # tardiness weight in total cost
+gamma_obj: 1.0    # maintenance cost weight in total cost
+delta_obj: 0.0    # ordering cost weight in total cost

@@ -100,6 +100,7 @@ def compute_maintenance_reward(
     w_RUL      = weights.get("w_RUL",       0.05)
     lam        = weights.get("lambda_shared", 0.3)
     w_hold     = weights.get("w_hold",      0.005)
+    w_fail_idle = weights.get("w_fail_idle", 2.0)  # penalty per FAIL machine per step
 
     # ── Maintenance action costs ─────────────────────────────────────────
     maint_cost = sum(c_PM if a == 1 else c_CM if a == 2 else 0
@@ -110,6 +111,15 @@ def compute_maintenance_reward(
 
     # ── Inventory holding cost (EOQ theory §7.5) ────────────────────────
     holding_cost = w_hold * inventory_total
+
+    # ── Idle-FAIL penalty — dense signal to trigger CM (design doc: CM recovers capacity)
+    # Agent 1 pays w_fail_idle per FAIL machine per step until CM is initiated.
+    # This makes CM recovery immediately visible: sending CM removes the penalty.
+    n_idle_fail = sum(
+        1 for s in machine_states
+        if s.status == MachineStatus.FAIL
+    )
+    fail_idle_penalty = w_fail_idle * n_idle_fail
 
     # ── DELTA-RUL fleet signal (design doc §6.2) ────────────────────────
     # mean(ΔRUL_m) across OP machines — fires positive on PM, -1 normally
@@ -129,6 +139,6 @@ def compute_maintenance_reward(
     # w_avail rewards MAINTAINING high availability (level, per design doc)
     avail_bonus = w_avail * compute_system_availability(machine_states)
 
-    r1 = (-maint_cost - resource_cost - holding_cost
+    r1 = (-maint_cost - resource_cost - holding_cost - fail_idle_penalty
           + rul_bonus + avail_bonus + lam * shared_reward)
     return float(r1)

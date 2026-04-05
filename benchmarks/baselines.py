@@ -25,7 +25,7 @@ from typing import List, Optional
 import math
 
 from environments.mfg_env import ManufacturingEnv, AGENT_PDM, AGENT_JOBSHOP
-from environments.transitions.degradation import MachineStatus, estimate_rul
+from environments.transitions.degradation import MachineStatus
 from environments.transitions.job_dynamics import OpStatus
 
 try:
@@ -255,49 +255,28 @@ class ABRMDDQRBaseline(BaselinePolicy):
         c_PM: float, c_CM: float, tau_PM: int, tau_CM: int
     ) -> float:
         """
-        Solves ABR (Age-Based Replacement) via renewal theory.
-
-        Cost rate = [c_PM * R(t) + c_CM * F(t)] /
-                    [E[min(T,t)] + tau_PM * R(t) + tau_CM * F(t)]
-
-        where:
-            R(t) = exp(-(t/eta)^beta)          survival function
-            F(t) = 1 - R(t)                    CDF
-            E[min(T,t)] = integral_0^t R(u) du  expected time to renewal
-
-        This formula correctly goes to c_CM/MTTF as t->inf, giving a
-        finite minimum at t* for c_CM > c_PM.
+        Solves ABR: t* = argmin expected_cost_per_unit_time.
+        Uses scipy.optimize.minimize_scalar on cost_rate(t).
         """
         if not SCIPY_AVAILABLE:
-            # Fallback: 0.6 * eta (reasonable heuristic)
+            # Fallback: 60% of characteristic life
             return eta * 0.6
 
-        try:
-            from scipy.integrate import quad
-        except ImportError:
-            return eta * 0.6
-
-        def weibull_survival(t):
-            return math.exp(-(t / eta) ** beta)
+        def weibull_cdf(t):
+            return 1.0 - math.exp(-(t / eta) ** beta)
 
         def cost_rate(t):
             if t <= 0:
                 return float("inf")
-            R_t = weibull_survival(t)
-            F_t = 1.0 - R_t
-            expected_cost = c_PM * R_t + c_CM * F_t
-            # E[min(T,t)] = integral_0^t R(u) du  (by integration by parts)
-            e_min_t, _ = quad(weibull_survival, 0.0, t, limit=50)
-            expected_len = e_min_t + float(tau_PM) * R_t + float(tau_CM) * F_t
-            return expected_cost / max(expected_len, 1e-9)
+            p_fail = weibull_cdf(t)
+            p_surv = 1.0 - p_fail
+            # Expected cost in one cycle
+            expected_cost = c_PM * p_surv + c_CM * p_fail
+            # Expected cycle length
+            expected_len = t * p_surv + (t + tau_CM) * p_fail + tau_PM * p_surv
+            return expected_cost / max(expected_len, 1e-6)
 
-        # Search over [1, 2*eta] — t* is typically 0.4-0.8 * eta for wear-out
-        result = minimize_scalar(
-            cost_rate,
-            bounds=(1.0, eta * 2.0),
-            method="bounded",
-            options={"xatol": 0.5}
-        )
+        result = minimize_scalar(cost_rate, bounds=(1.0, eta * 3.0), method="bounded")
         return max(result.x, 1.0)
 
     def agent1_action(self, env: ManufacturingEnv) -> dict:
@@ -323,7 +302,7 @@ class ABRMDDQRBaseline(BaselinePolicy):
             # Compute ABR interval on first step for each machine
             if mid not in self._abr_intervals:
                 self._abr_intervals[mid] = self._compute_abr_interval(
-                    s.beta, s.eta, c_PM, c_CM, s.tau_PM, s.tau_CM
+                    s.beta, s.eta, c_PM, c_CM, s.tau_PM_shifts, s.tau_CM_shifts
                 )
 
             t_star = self._abr_intervals[mid]

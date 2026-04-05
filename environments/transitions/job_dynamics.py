@@ -424,11 +424,11 @@ class JobDynamicsEngine:
 
     def assign_operation(
         self,
-        jobs:       List[Job],
-        job_id:     int,
-        op_idx:     int,
-        machine_id: int,
-        rng:        np.random.Generator,
+        jobs:           List[Job],
+        job_id:         int,
+        op_idx:         int,
+        machine_id:     int,
+        rng:            np.random.Generator,
     ) -> Tuple[List[Job], float]:
         """
         Assigns a READY operation to a machine.
@@ -520,9 +520,11 @@ class JobDynamicsEngine:
         for job in new_jobs:
             job.release_time = current_time
             # Tighter due dates for mid-episode arrivals
-            job.due_date = current_time + float(rng.integers(
-                low=job.n_ops * 2, high=min(50, self.t_max_train - int(current_time))
-            ))
+            # Guard: ensure low < high even when arriving late in episode
+            remaining = self.t_max_train - int(current_time)
+            low  = job.n_ops * 2
+            high = max(low + 1, min(50, remaining))
+            job.due_date = current_time + float(rng.integers(low, high))
 
         return new_jobs
 

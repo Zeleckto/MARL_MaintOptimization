@@ -126,6 +126,8 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self.n_jobs     = config.get("jobs", {}).get("n_jobs_train", 20)
         self.stoch_level = config.get("stochasticity_level", 1)
 
+        self._n_consumable = len(config["resources"]["consumable"])
+        self._n_renewable  = len(config["resources"]["renewable"])
         # Resource requirement matrices [n_machines, n_renewable+n_consumable]
         # These are loaded from config — TBD values for now, set to defaults
         n_ren = len(config["resources"]["renewable"])

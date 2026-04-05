@@ -508,7 +508,7 @@ def make_training_excel(data: dict, output_path: str) -> None:
 
     ws3.cell(row=1, column=1, value="BTP2 MARL — Training Summary Statistics")
     ws3["A1"].font = Font(bold=True, color="FFB900", size=12)
-    ws3.merge_cells("A1:7")
+    ws3.merge_cells("A1:G1")
 
     stat_headers = ["Metric", "N Points", "Mean", "Std", "Min", "Max",
                     "Trend (slope/1000 steps)"]

@@ -295,24 +295,83 @@ class MAPPOTrainer:
                             f"health={avg_health:.1f}%"
                         )
 
+                    # ── All design doc Section 10 KPIs ─────────────────────
+                    n_PM = self.env._episode_pm
+                    n_CM = self.env._episode_cm
+                    n_F  = self.env._episode_failures
+
+                    # Makespan: latest completion time across all jobs
+                    completed = [j for j in self.env.jobs
+                                 if j.completion_time is not None]
+                    makespan = float(max(
+                        (j.completion_time for j in completed),
+                        default=float(self.env.current_step)
+                    ))
+
+                    # System availability: fraction of machine-shifts in OP
+                    from environments.transitions.degradation import MachineStatus
+                    n_op_now = sum(
+                        1 for s in self.env.machine_states
+                        if s.status == MachineStatus.OP
+                    )
+                    availability = n_op_now / max(len(self.env.machine_states), 1)
+
+                    # MTTR: total maintenance shifts / maintenance events
+                    cfg_m = self.config.get("machines", [])
+                    total_maint_shifts = (
+                        n_PM * np.mean([m.get("tau_PM_shifts", 2) for m in cfg_m]) +
+                        n_CM * np.mean([m.get("tau_CM_shifts", 6) for m in cfg_m])
+                    ) if cfg_m else 0.0
+                    maint_events = n_PM + n_CM
+                    mttr = total_maint_shifts / max(maint_events, 1)
+
+                    # Mean RUL normalised by eta
+                    eta_vals = [m.get("eta", 1000.0) for m in cfg_m]
+                    mean_rul_norm = float(np.mean([
+                        s.rul / max(eta, 1.0)
+                        for s, eta in zip(self.env.machine_states, eta_vals)
+                    ])) if eta_vals else 0.0
+
+                    # Cost KPIs (eq 3.14)
+                    w = self.reward_fn.weights if hasattr(self, "reward_fn") else {}
+                    w = getattr(self.env.reward_fn, "weights", {})
+                    c_PM_w   = w.get("c_PM",   1.0)
+                    c_CM_w   = w.get("c_CM",   7.0)
+                    c_fail_w = w.get("c_fail", 25.0)
+                    maint_cost   = n_PM * c_PM_w + n_CM * c_CM_w + n_F * c_fail_w
+                    order_cost   = float(getattr(self.env, "_episode_order_cost", 0.0))
+                    holding_cost = float(avg_inv * w.get("w_hold", 0.005) *
+                                         self.env.current_step)
+                    alpha = w.get("alpha", 1.0)
+                    tard_val = self.env.job_engine.compute_weighted_tardiness(
+                        self.env.jobs)
+                    total_cost = (alpha * tard_val + maint_cost +
+                                  order_cost + holding_cost)
+
                     self.logger.log_episode(
                         episode          = self.episode,
                         episode_return1  = self.buffer.episode_r1,
                         episode_return2  = self.buffer.episode_r2,
                         episode_length   = self.buffer.episode_steps,
-                        n_failures       = self.env._episode_failures,
-                        weighted_tard    = self.env.job_engine.compute_weighted_tardiness(
-                            self.env.jobs
-                        ),
+                        n_failures       = n_F,
+                        weighted_tard    = tard_val,
                         n_jobs_completed = self.env._episode_completions,
                         avg_health       = avg_health,
-                        n_PM             = self.env._episode_pm,
-                        n_CM             = self.env._episode_cm,
+                        n_PM             = n_PM,
+                        n_CM             = n_CM,
                         n_jobs_late      = n_jobs_late,
                         avg_hazard_rate  = avg_hazard,
                         mtbf             = mtbf,
                         service_level    = service_level,
                         avg_inventory    = avg_inv,
+                        makespan         = makespan,
+                        availability     = availability,
+                        mttr             = mttr,
+                        mean_rul_norm    = mean_rul_norm,
+                        maint_cost       = maint_cost,
+                        order_cost       = order_cost,
+                        holding_cost     = holding_cost,
+                        total_cost       = total_cost,
                     )
 
                     self.episode += 1

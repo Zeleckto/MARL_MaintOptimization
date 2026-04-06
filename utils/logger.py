@@ -72,23 +72,50 @@ class Logger:
         mtbf:             float = 0.0,
         service_level:    float = 0.0,
         avg_inventory:    float = 0.0,
+        # Design doc KPIs (Section 10)
+        makespan:         float = 0.0,
+        availability:     float = 0.0,
+        mttr:             float = 0.0,
+        mean_rul_norm:    float = 0.0,
+        maint_cost:       float = 0.0,
+        order_cost:       float = 0.0,
+        holding_cost:     float = 0.0,
+        total_cost:       float = 0.0,
     ) -> None:
         """Log per-episode summary metrics."""
         if not self.enabled:
             return
+        # Core episode KPIs
         self.writer.add_scalar("episode/return_agent1",      episode_return1,  episode)
         self.writer.add_scalar("episode/return_agent2",      episode_return2,  episode)
         self.writer.add_scalar("episode/length",             episode_length,   episode)
         self.writer.add_scalar("episode/failures",           n_failures,       episode)
         self.writer.add_scalar("episode/weighted_tardiness", weighted_tard,    episode)
         self.writer.add_scalar("episode/jobs_completed",     n_jobs_completed, episode)
-        self.writer.add_scalar("episode/avg_machine_health", avg_health,       episode)
-        self.writer.add_scalar("episode/n_PM",               n_PM,             episode)
-        self.writer.add_scalar("episode/n_CM",               n_CM,             episode)
         self.writer.add_scalar("episode/jobs_late",          n_jobs_late,      episode)
-        self.writer.add_scalar("episode/avg_hazard_rate",    avg_hazard_rate,  episode)
-        self.writer.add_scalar("episode/mtbf",               mtbf,             episode)
         self.writer.add_scalar("episode/service_level",      service_level,    episode)
+        # Maintenance KPIs (design doc 10.1)
+        self.writer.add_scalar("episode/n_PM",               n_PM,             episode)
+        self.writer.add_scalar("episode/pm_events",          n_PM,             episode)
+        self.writer.add_scalar("episode/n_CM",               n_CM,             episode)
+        self.writer.add_scalar("episode/cm_events",          n_CM,             episode)
+        pm_cm = n_PM / max(n_CM, 1)
+        self.writer.add_scalar("episode/pm_cm_ratio",        pm_cm,            episode)
+        self.writer.add_scalar("episode/mtbf",               mtbf,             episode)
+        self.writer.add_scalar("episode/mttr",               mttr,             episode)
+        self.writer.add_scalar("episode/availability",       availability,     episode)
+        self.writer.add_scalar("episode/makespan",           makespan,         episode)
+        # Machine health and RUL
+        self.writer.add_scalar("episode/avg_machine_health", avg_health,       episode)
+        self.writer.add_scalar("episode/avg_health",         avg_health,       episode)
+        self.writer.add_scalar("episode/avg_hazard_rate",    avg_hazard_rate,  episode)
+        self.writer.add_scalar("episode/mean_rul_norm",      mean_rul_norm,    episode)
+        # Cost KPIs (design doc eq 3.14)
+        self.writer.add_scalar("episode/maint_cost",         maint_cost,       episode)
+        self.writer.add_scalar("episode/order_cost",         order_cost,       episode)
+        self.writer.add_scalar("episode/holding_cost",       holding_cost,     episode)
+        self.writer.add_scalar("episode/total_cost",         total_cost,       episode)
+        # Inventory
         self.writer.add_scalar("episode/avg_inventory",      avg_inventory,    episode)
 
 

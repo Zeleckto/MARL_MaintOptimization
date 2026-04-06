@@ -66,14 +66,15 @@ def compute_rul_bonus(
 
 
 def compute_maintenance_reward(
-    maintenance_actions: List[int],       # [n_machines] 0=none,1=PM,2=CM
-    ordering_cost:       float,           # raw ordering cost from resource_dynamics
+    maintenance_actions: List[int],       # [n_machines] 0=none,1=PM (CM removed)
+    ordering_cost:       float,
     machine_states:      List[MachineState],
-    eta_values:          List[float],     # characteristic life per machine
+    eta_values:          List[float],
     shared_reward:       float,
     weights:             dict,
-    inventory_total:     float = 0.0,     # sum of consumable inventory levels
-    delta_ruls:          List[float] = None,  # ΔRUL per machine (design doc §6.2)
+    inventory_total:     float = 0.0,
+    delta_ruls:          List[float] = None,
+    n_auto_cm:           int = 0,         # machines auto-CM initiated this step
 ) -> float:
     """
     Agent 1 reward — design doc v2 eq. 3.14 + Section 6.2 DELTA-RUL signal.
@@ -100,10 +101,11 @@ def compute_maintenance_reward(
     w_RUL      = weights.get("w_RUL",       0.05)
     lam        = weights.get("lambda_shared", 0.3)
     w_hold     = weights.get("w_hold",      0.005)
-    w_fail_idle = weights.get("w_fail_idle", 2.0)  # penalty per FAIL machine per step
+    # w_fail_idle removed — CM is now auto-handled by environment
+    # c_CM still charges when auto-CM is triggered (real operational cost)
 
-    # ── Maintenance action costs ─────────────────────────────────────────
-    maint_cost = sum(c_PM if a == 1 else c_CM if a == 2 else 0
+    # ── Maintenance action costs (agent only decides noop/PM now) ────────
+    maint_cost = sum(c_PM if a == 1 else 0
                      for a in maintenance_actions)
 
     # ── Resource ordering cost ──────────────────────────────────────────
@@ -112,14 +114,10 @@ def compute_maintenance_reward(
     # ── Inventory holding cost (EOQ theory §7.5) ────────────────────────
     holding_cost = w_hold * inventory_total
 
-    # ── Idle-FAIL penalty — dense signal to trigger CM (design doc: CM recovers capacity)
-    # Agent 1 pays w_fail_idle per FAIL machine per step until CM is initiated.
-    # This makes CM recovery immediately visible: sending CM removes the penalty.
-    n_idle_fail = sum(
-        1 for s in machine_states
-        if s.status == MachineStatus.FAIL
-    )
-    fail_idle_penalty = w_fail_idle * n_idle_fail
+    # ── Auto-CM cost: charge when environment initiates CM on a failed machine
+    # This makes failure costly without requiring the agent to decide on CM.
+    # c_CM fires once per auto-CM event (matches real cost: parts, technicians)
+    auto_cm_cost = c_CM * n_auto_cm
 
     # ── DELTA-RUL fleet signal (design doc §6.2) ────────────────────────
     # mean(ΔRUL_m) across OP machines — fires positive on PM, -1 normally
@@ -139,6 +137,6 @@ def compute_maintenance_reward(
     # w_avail rewards MAINTAINING high availability (level, per design doc)
     avail_bonus = w_avail * compute_system_availability(machine_states)
 
-    r1 = (-maint_cost - resource_cost - holding_cost - fail_idle_penalty
+    r1 = (-maint_cost - resource_cost - holding_cost - auto_cm_cost
           + rul_bonus + avail_bonus + lam * shared_reward)
     return float(r1)

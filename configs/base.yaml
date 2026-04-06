@@ -150,7 +150,7 @@ mappo:
   gamma:           0.99
   gae_lambda:      0.95
   clip_eps:        0.2
-  entropy_coef:    0.01            # 5x higher than default -> prevents early collapse
+  entropy_coef:    0.01   # 2-action space converges faster with lower entropy            # 5x higher than default -> prevents early collapse
   value_loss_coef: 0.5
   max_grad_norm:   0.5
   rollout_steps:   2048
@@ -208,10 +208,9 @@ processing:
   sigma_log: 0.15                 # LogNormal sigma for proc time noise (Phase 2+)
 
 # --- Logging -----------------------------------------------------------------
-# --- Logging -----------------------------------------------------------------
 logging:
   tensorboard_dir:      "runs/"
   checkpoint_dir:       "checkpoints/"
-  checkpoint_every_steps: 25000    # overwrite latest.pt every 50k steps
-  milestone_every_steps:  50000  # permanent: step_100k.pt, step_200k.pt...
+  checkpoint_every_steps: 50000    # overwrite latest.pt every 50k steps
+  milestone_every_steps:  100000   # permanent: step_100k.pt, step_200k.pt...
   log_every_n_episodes: 10

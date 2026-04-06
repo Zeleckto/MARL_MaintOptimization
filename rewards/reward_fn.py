@@ -87,6 +87,7 @@ class RewardFunction:
         shared_reward:       float,
         inventory_total:     float,
         delta_ruls:          Optional[List[float]] = None,
+        n_auto_cm:           int = 0,
     ) -> float:
         """Calls compute_maintenance_reward with only the params it accepts."""
         kwargs = {
@@ -95,6 +96,7 @@ class RewardFunction:
             "machine_states":      machine_states,
             "shared_reward":       shared_reward,
             "weights":             self.weights,
+            "n_auto_cm":           n_auto_cm,
         }
         if "eta_values" in self._maint_params:
             kwargs["eta_values"] = self.eta_values
@@ -102,6 +104,8 @@ class RewardFunction:
             kwargs["inventory_total"] = inventory_total
         if "delta_ruls" in self._maint_params and delta_ruls is not None:
             kwargs["delta_ruls"] = delta_ruls
+        if "n_auto_cm" in self._maint_params:
+            kwargs["n_auto_cm"] = kwargs.pop("n_auto_cm", 0)
         return compute_maintenance_reward(**kwargs)
 
 
@@ -151,6 +155,7 @@ class RewardFunction:
         n_pending_ops:            int = 0,
         inventory_total:          float = 0.0,
         delta_ruls:               Optional[List[float]] = None,
+        n_auto_cm:                int = 0,
     ) -> Tuple[float, float, float]:
         """Computes r1, r2, R_shared for one timestep."""
 
@@ -165,6 +170,7 @@ class RewardFunction:
         r1 = self._call_maintenance(
             maintenance_actions, ordering_cost, machine_states,
             r_shared, inventory_total, delta_ruls=delta_ruls,
+            n_auto_cm=n_auto_cm,
         )
         r2 = self._call_scheduling(
             jobs, completed_job_ids, assignment,

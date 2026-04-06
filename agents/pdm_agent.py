@@ -63,7 +63,7 @@ class PDMAgent:
 
         Returns:
             (action_dict, log_prob, entropy)
-            action_dict: {'maintenance': np.ndarray [n_mach],
+            action_dict: {'maintenance': np.ndarray [n_mach],  values in {0=noop, 1=PM}
                           'reorder':     np.ndarray [n_con]}
         """
         if not TORCH_AVAILABLE or self.policy is None:

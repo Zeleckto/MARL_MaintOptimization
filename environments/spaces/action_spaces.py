@@ -30,48 +30,43 @@ from environments.transitions.resource_dynamics import ResourceState
 # Q_max: max units orderable per consumable per step
 Q_MAX = 10
 
-# Action indices for maintenance
+# Action indices for Agent 1 maintenance decisions
+# NOTE: CM is no longer an agent decision — it is triggered automatically
+# by the environment when a machine fails (see mfg_env._attempt_auto_cm).
 ACTION_NONE = 0
 ACTION_PM   = 1
-ACTION_CM   = 2
+# ACTION_CM = 2  ← removed from agent action space; kept only as MachineStatus value
 
 
 def build_agent1_maintenance_mask(
     machine_states: List[MachineState],
-    machine_busy:   List[bool],         # True if machine processing a job
+    machine_busy:   List[bool],
     resource_state: ResourceState,
-    rho_PM:         np.ndarray,         # [n_machines, n_ren+n_con]
-    rho_CM:         np.ndarray,
+    rho_PM:         np.ndarray,
+    rho_CM:         np.ndarray,   # kept in signature for API compatibility
     n_renewable:    int,
 ) -> np.ndarray:
     """
     Builds maintenance action mask for Agent 1.
-    Shape: [n_machines, 3] — True means action is ALLOWED.
+    Shape: [n_machines, 2] — columns are [noop, PM].
+
+    CM is NO LONGER an agent action.  When a machine fails the environment
+    automatically initiates CM (see mfg_env._attempt_auto_cm).
 
     Rules:
-        PM (action=1): machine must be OP AND idle AND resources available
-        CM (action=2): machine must be FAIL AND resources available
-        NONE (action=0): always allowed
-
-    Args:
-        machine_states: Current machine states
-        machine_busy:   [n_machines] True if machine currently processing op
-        resource_state: Current resource state
-        rho_PM:         Resource requirements for PM [n_mach, n_ren+n_con]
-        rho_CM:         Resource requirements for CM [n_mach, n_ren+n_con]
-        n_renewable:    Number of renewable resources
+        noop (0): always allowed
+        PM   (1): machine must be OP AND idle AND resources available
 
     Returns:
-        [n_machines, 3] bool mask
+        [n_machines, 2] bool mask  (True = allowed)
     """
     n_machines = len(machine_states)
-    mask = np.zeros((n_machines, 3), dtype=bool)
+    mask = np.zeros((n_machines, 2), dtype=bool)
 
     for i, s in enumerate(machine_states):
-        # NONE always allowed
-        mask[i, ACTION_NONE] = True
+        mask[i, ACTION_NONE] = True          # noop always valid
 
-        # PM: must be OP, idle, and have resources
+        # PM: machine must be OP, not currently processing a job, resources ok
         if (s.status == MachineStatus.OP
                 and not machine_busy[i]
                 and resource_state.can_do_maintenance(
@@ -79,14 +74,6 @@ def build_agent1_maintenance_mask(
                     rho_PM[i, n_renewable:]
                 )):
             mask[i, ACTION_PM] = True
-
-        # CM: must be FAIL and have resources
-        if (s.status == MachineStatus.FAIL
-                and resource_state.can_do_maintenance(
-                    rho_CM[i, :n_renewable].astype(int),
-                    rho_CM[i, n_renewable:]
-                )):
-            mask[i, ACTION_CM] = True
 
     return mask
 

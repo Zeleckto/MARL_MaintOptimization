@@ -136,7 +136,11 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
 
         # Default resource requirements (will be overridden when benchmark instances finalised)
         self.rho_PM = np.ones((self.n_machines, n_res), dtype=float)
-        self.rho_CM = np.ones((self.n_machines, n_res), dtype=float) * 2.0
+        # CM needs same renewable resources as PM (1 tech, 1 tool, 1 bay)
+        # but 2x consumables (more spare parts). Allows 2 CMs to run with K=[3,4,4]
+        self.rho_CM = np.ones((self.n_machines, n_res), dtype=float)
+        self.rho_CM[:, :n_ren] = 1.0   # renewable: same as PM
+        self.rho_CM[:, n_ren:] = 2.0   # consumable: 2x PM (more parts)
         self.n_renewable = n_ren
 
         # Precompute max CM consumable need (for reorder masking)
@@ -185,6 +189,8 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self._episode_pm          = 0
         self._delta_ruls          = [0.0] * len(self.machine_states)
         self._episode_cm          = 0
+        self._cm_queue: set      = set()   # machines awaiting auto-CM
+        self._auto_cm_count      = 0
 
 
     # =========================================================================
@@ -212,6 +218,8 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self._episode_completions = 0
         self._episode_pm          = 0
         self._episode_cm          = 0
+        self._cm_queue: set      = set()   # machines awaiting auto-CM
+        self._auto_cm_count      = 0
 
         # Reset agents
         self.agents = self.possible_agents[:]
@@ -402,9 +410,13 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             self.jobs, preempted = self.failure_handler.handle_preemption(
                 newly_failed, self.jobs
             )
-            # Preempted ops' machines are freed
             self._episode_failures += len(newly_failed)
+            # Queue these machines for automatic CM
+            self._cm_queue.update(newly_failed)
         self._newly_failed = newly_failed
+
+        # Auto-CM: attempt to start CM for all queued machines
+        self._auto_cm_count = self._attempt_auto_cm()
 
         # Count PM and CM starts (OP→PM and FAIL→CM transitions this step)
         from environments.transitions.degradation import MachineStatus
@@ -445,6 +457,48 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             self.truncations[agent]  = timed_out and not all_done
 
 
+
+    def _attempt_auto_cm(self) -> int:
+        """
+        Automatically initiate CM for all machines in _cm_queue.
+        Called every step after failure detection.
+
+        CM is no longer an Agent 1 decision — it is a hard environment rule:
+        any failed machine is repaired as soon as resources are available.
+
+        Returns:
+            Number of CM events started this step (for reward charging).
+        """
+        from environments.transitions.degradation import MachineStatus
+        still_queued = set()
+        n_started    = 0
+
+        for m_id in sorted(self._cm_queue):  # sorted for determinism
+            s = self.machine_states[m_id]
+
+            # Machine may have been cleared by other means (shouldn't happen, guard)
+            if s.status != MachineStatus.FAIL:
+                continue
+
+            # Check renewable + consumable resources
+            ren_needed = self.rho_CM[m_id, :self.n_renewable].astype(int)
+            con_needed = self.rho_CM[m_id, self.n_renewable:]
+
+            if self.resource_state.can_do_maintenance(ren_needed, con_needed):
+                # Resources available — start CM immediately
+                s.status = MachineStatus.CM
+                s.maint_steps_remaining = s.tau_CM_shifts
+                # Consume resources (renewables held until maintenance finishes)
+                self.resource_state.renewable_available -= ren_needed
+                self.resource_state.consumable_inventory -= con_needed
+                n_started += 1
+            else:
+                # Resources blocked (e.g. all bays occupied by PM) — retry next step
+                still_queued.add(m_id)
+
+        self._cm_queue = still_queued
+        return n_started
+
     def _compute_rewards(self) -> None:
         """Compute and store rewards for both agents."""
         # Build eligible_map for criticality weighting: machine -> ops that need it
@@ -471,6 +525,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             inventory_total          = float(
                 self.resource_state.consumable_inventory.sum()),
             delta_ruls               = getattr(self, "_delta_ruls", None),
+            n_auto_cm                = getattr(self, "_auto_cm_count", 0),
         )
         self.rewards[AGENT_PDM]     = r1
         self.rewards[AGENT_JOBSHOP] = r2

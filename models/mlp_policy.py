@@ -5,7 +5,8 @@ Agent 1 (PDM) actor network — MLP policy.
 
 Input:  Agent 1's flat observation vector
 Output: Two heads:
-    - Maintenance logits: [n_machines, 3] (none/PM/CM per machine)
+    - Maintenance logits: [n_machines, 2] (none/PM per machine)
+      CM is auto-handled by the environment — not an agent decision.
     - Reorder logits:     [n_consumable, Q_max+1] (order quantity per resource)
 
 Masking applied BEFORE softmax (set invalid logits to -inf).
@@ -54,9 +55,9 @@ class MLPPolicy(nn.Module if TORCH_AVAILABLE else object):
             in_dim = h
         self.trunk = nn.Sequential(*layers)
 
-        # Maintenance head: [n_machines * 3] logits
-        # Reshape to [n_machines, 3] after forward
-        self.maint_head = nn.Linear(in_dim, n_machines * 3)
+        # Maintenance head: [n_machines * 2] logits (noop, PM only)
+        # CM removed from action space — auto-handled by environment
+        self.maint_head = nn.Linear(in_dim, n_machines * 2)
         self.n_machines = n_machines
 
         # Reorder head: [n_consumable * (q_max+1)] logits
@@ -68,7 +69,7 @@ class MLPPolicy(nn.Module if TORCH_AVAILABLE else object):
     def forward(
         self,
         obs:          "torch.Tensor",            # [batch, obs_dim]
-        maint_mask:   Optional["torch.Tensor"],  # [batch, n_machines, 3] bool
+        maint_mask:   Optional["torch.Tensor"],  # [batch, n_machines, 2] bool
         reorder_mask: Optional["torch.Tensor"],  # [batch, n_consumable] bool
     ) -> Tuple["Categorical", "Categorical"]:
         """
@@ -81,8 +82,8 @@ class MLPPolicy(nn.Module if TORCH_AVAILABLE else object):
 
         Returns:
             (maint_dist, reorder_dist)
-            maint_dist:  Categorical over 3 actions per machine
-                         Shape: [batch * n_machines, 3] -> sample [batch, n_machines]
+            maint_dist:  Categorical over 2 actions per machine (noop, PM)
+                         Shape: [batch * n_machines, 2] -> sample [batch, n_machines]
             reorder_dist: Categorical over Q_max+1 quantities per resource
         """
         import torch
@@ -91,7 +92,7 @@ class MLPPolicy(nn.Module if TORCH_AVAILABLE else object):
 
         # --- Maintenance head ---
         maint_logits = self.maint_head(features)              # [batch, n_machines*3]
-        maint_logits = maint_logits.view(-1, self.n_machines, 3)  # [batch, n_mach, 3]
+        maint_logits = maint_logits.view(-1, self.n_machines, 2)  # [batch, n_mach, 2]
 
         if maint_mask is not None:
             # Set invalid action logits to -inf
@@ -99,7 +100,7 @@ class MLPPolicy(nn.Module if TORCH_AVAILABLE else object):
 
         # Flatten batch*machines for Categorical
         batch = maint_logits.shape[0]
-        maint_logits_flat = maint_logits.view(batch * self.n_machines, 3)
+        maint_logits_flat = maint_logits.view(batch * self.n_machines, 2)
         maint_dist = Categorical(logits=maint_logits_flat)
 
         # --- Reorder head ---

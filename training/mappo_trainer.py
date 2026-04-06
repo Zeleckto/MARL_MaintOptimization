@@ -419,8 +419,11 @@ class MAPPOTrainer:
                 )
 
             # ── Checkpoint ─────────────────────────────────────────────────
-            if (self.global_step % 50_000 < self.rollout_steps
+            ckpt_every = self.config.get("logging", {}).get("checkpoint_every_steps", 50_000)
+            if (self.global_step % ckpt_every < self.rollout_steps
                     and TORCH_AVAILABLE and self.critic is not None):
+
+                # Always save latest (overwrite)
                 save_checkpoint(
                     checkpoint_dir = self.ckpt_dir,
                     episode        = self.episode,
@@ -434,6 +437,25 @@ class MAPPOTrainer:
                     config         = self.config,
                     tag            = "latest",
                 )
+
+                # Save milestone checkpoint (permanent snapshot every N steps)
+                milestone_every = self.config.get("logging", {}).get(
+                    "milestone_every_steps", 100_000)
+                if self.global_step % milestone_every < self.rollout_steps:
+                    tag = f"step_{self.global_step // 1000:04d}k"
+                    save_checkpoint(
+                        checkpoint_dir = self.ckpt_dir,
+                        episode        = self.episode,
+                        global_step    = self.global_step,
+                        actor1         = self.agent1.policy,
+                        actor2         = self.agent2.tgin,
+                        critic         = self.critic,
+                        optim_actor1   = self.optim1,
+                        optim_actor2   = self.optim2,
+                        optim_critic   = self.optim_critic,
+                        config         = self.config,
+                        tag            = tag,
+                    )
 
         print(f"\nTraining complete. Total steps: {self.global_step:,}")
         self.logger.close()

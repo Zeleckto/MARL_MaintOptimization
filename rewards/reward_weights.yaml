@@ -39,7 +39,7 @@ w_hold: 0.005
 # Makes CM recovery benefit immediately visible to Agent 1.
 # w_fail_idle=2.0: 3 failed machines = -6/step penalty vs c_CM=7 one-time cost
 #   => agent pays back c_CM cost in ~3-4 steps = strong CM incentive
-w_fail_idle: 2.0
+w_fail_idle: 20
 
 # --- Agent 2 (Job Shop) weights --------------------------------------------
 alpha: 1.0                     # tardiness weight (eq. 3.14 alpha)

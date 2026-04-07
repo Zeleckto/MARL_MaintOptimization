@@ -158,8 +158,11 @@ def test_pm_consumes_renewable():
         rng=rng,
     )
     # M0 PM needs 1 technician
-    assert state.renewable_available[0] < initial_techs
-    print(f"PASS: PM reduces technicians {initial_techs} -> {state.renewable_available[0]}")
+    # Renewable tracking moved to env recompute — resource_manager._consume
+    # now only deducts consumables. Test consumable deduction instead.
+    assert state.consumable_inventory[0] < manager.initial_inventories[0], \
+        "PM should reduce consumable inventory"
+    print(f"PASS: PM reduces consumable inventory (renewable via env recompute)")
 
 
 def test_cm_consumes_more_than_pm():

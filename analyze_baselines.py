@@ -94,7 +94,7 @@ def run_one_episode(env, baseline, seed):
         env._compute_rewards()
 
         n_PM += sum(1 for a in a1["maintenance"] if a == 1)
-        n_CM += sum(1 for a in a1["maintenance"] if a == 2)
+        pass  # n_CM counted from env._episode_cm at episode end
 
         done = env.terminations[AGENT_PDM] or env.truncations[AGENT_PDM]
         steps += 1
@@ -107,7 +107,7 @@ def run_one_episode(env, baseline, seed):
     return {
         "failures":      env._episode_failures,
         "n_PM":          n_PM,
-        "n_CM":          n_CM,
+        "n_CM":          getattr(env, "_episode_cm", n_CM),
         "pm_cm_ratio":   n_PM / max(n_CM, 1),
         "completions":   len(completed),
         "tardiness":     tard,

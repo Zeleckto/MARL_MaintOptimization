@@ -58,7 +58,7 @@ class MachineStatus:
     OP   = 0   # operating: can receive job assignments
     PM   = 1   # preventive maintenance in progress: unavailable
     CM   = 2   # corrective maintenance in progress: unavailable
-    FAIL = 3   # just failed: Agent 1 must initiate CM
+    FAIL = 3   # just failed: env auto-initiates CM via _attempt_auto_cm()
 
 
 # =============================================================================
@@ -239,12 +239,14 @@ class DegradationEngine:
             return state
 
         # ------------------------------------------------------------------
-        # STEP 2: Handle FAIL status (CM must have been initiated by Agent 1)
+        # STEP 2: Handle FAIL status
+        # Auto-CM: environment initiates CM via mfg_env._attempt_auto_cm().
+        # action_maintenance==2 path kept for legacy/baseline compatibility.
         # ------------------------------------------------------------------
         if state.status == MachineStatus.FAIL:
-            # Agent 1 should have set action_maintenance=2 (CM)
-            # If not, machine stays FAIL — penalty accumulates via shared reward
-            if action_maintenance == 2:  # CM initiated
+            # If auto-CM already set status to CM (via _attempt_auto_cm),
+            # this block is skipped (status != FAIL). Stays for baselines.
+            if action_maintenance == 2:  # CM initiated (legacy path)
                 state.status = MachineStatus.CM
                 state.maint_steps_remaining = state.tau_CM_shifts
             # Either way, no degradation or operating this step

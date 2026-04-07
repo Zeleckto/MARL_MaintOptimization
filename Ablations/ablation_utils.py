@@ -118,7 +118,7 @@ def _run_baseline_episode(env, baseline, seed: int) -> dict:
         env._compute_rewards()
 
         n_PM += sum(1 for a in a1["maintenance"] if a == 1)
-        n_CM += sum(1 for a in a1["maintenance"] if a == 2)
+        pass  # n_CM counted from env._episode_cm at episode end
         done = env.terminations[AGENT_PDM] or env.truncations[AGENT_PDM]
         steps += 1
 
@@ -128,8 +128,8 @@ def _run_baseline_episode(env, baseline, seed: int) -> dict:
     return {
         "failures":      env._episode_failures,
         "n_PM":          n_PM,
-        "n_CM":          n_CM,
-        "pm_cm_ratio":   n_PM / max(n_CM, 1),
+        "n_CM":          getattr(env, "_episode_cm", 0),  # auto-CM count
+        "pm_cm_ratio":   n_PM / max(getattr(env, "_episode_cm", 1), 1),
         "completions":   len(completed),
         "tardiness":     float(tard),
         "service_level": len(on_time) / max(len(completed), 1),
@@ -157,7 +157,7 @@ def _run_marl_episode(env, agent1, agent2, seed: int) -> dict:
         )
         env._step_agent1(action1)
         n_PM += sum(1 for a in action1["maintenance"] if a == 1)
-        n_CM += sum(1 for a in action1["maintenance"] if a == 2)
+        pass  # n_CM counted from env._episode_cm at episode end
 
         # Agent 2 action
         obs2, valid_pairs = env._build_agent2_obs()
@@ -178,8 +178,8 @@ def _run_marl_episode(env, agent1, agent2, seed: int) -> dict:
     return {
         "failures":      env._episode_failures,
         "n_PM":          n_PM,
-        "n_CM":          n_CM,
-        "pm_cm_ratio":   n_PM / max(n_CM, 1),
+        "n_CM":          getattr(env, "_episode_cm", 0),  # auto-CM count
+        "pm_cm_ratio":   n_PM / max(getattr(env, "_episode_cm", 1), 1),
         "completions":   len(completed),
         "tardiness":     float(tard),
         "service_level": len(on_time) / max(len(completed), 1),

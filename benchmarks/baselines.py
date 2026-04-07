@@ -68,7 +68,7 @@ class ReactiveBaseline(BaselinePolicy):
         maint = []
         for s in env.machine_states:
             if s.status == MachineStatus.FAIL:
-                maint.append(2)  # CM
+                maint.append(0)  # CM auto-handled by environment
             else:
                 maint.append(0)  # nothing
 
@@ -115,7 +115,7 @@ class RuleBasedEDFBaseline(BaselinePolicy):
         maint = []
         for s in env.machine_states:
             if s.status == MachineStatus.FAIL:
-                maint.append(2)
+                maint.append(0)  # CM auto-handled by environment
             elif (s.status == MachineStatus.OP
                   and not env.machine_busy[s.machine_id]
                   and s.health < self.PM_THRESHOLD):
@@ -182,7 +182,7 @@ class FixedIntervalSPTBaseline(BaselinePolicy):
             interval = int(s.eta * 0.6)
 
             if s.status == MachineStatus.FAIL:
-                maint.append(2)
+                maint.append(0)  # CM auto-handled by environment
             elif (s.status == MachineStatus.OP
                   and not env.machine_busy[s.machine_id]
                   and (t - last_pm) >= interval):
@@ -308,7 +308,7 @@ class ABRMDDQRBaseline(BaselinePolicy):
             t_star = self._abr_intervals[mid]
 
             if s.status == MachineStatus.FAIL:
-                maint.append(2)  # CM
+                maint.append(0)  # CM auto-handled by environment
             elif (s.status == MachineStatus.OP
                   and not env.machine_busy[s.machine_id]
                   and s.time_since_maint >= t_star):

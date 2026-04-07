@@ -209,8 +209,12 @@ processing:
 
 # --- Logging -----------------------------------------------------------------
 logging:
-  tensorboard_dir:      "runs/"
-  checkpoint_dir:       "checkpoints/"
-  checkpoint_every_steps: 50000    # overwrite latest.pt every 50k steps
-  milestone_every_steps:  100000   # permanent: step_100k.pt, step_200k.pt...
-  log_every_n_episodes: 10
+  # All outputs under outputs/ so the project root stays clean
+  tensorboard_dir:        "outputs/runs/"        # TensorBoard event files
+  checkpoint_dir:         "outputs/checkpoints/" # .pt checkpoint files
+  results_dir:            "outputs/results/"     # baselines, ablations, paper tables
+  log_dir:                "outputs/logs/"        # training_log.txt
+
+  checkpoint_every_steps:   50000  # overwrite outputs/checkpoints/latest.pt
+  milestone_every_steps:    50000  # ALSO save phaseN_step_050k.pt every 50k
+  log_every_n_episodes:     10

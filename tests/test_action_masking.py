@@ -22,7 +22,8 @@ from environments.spaces.action_spaces import (
     build_agent1_reorder_mask,
     build_agent2_valid_actions,
     flatten_agent2_actions,
-    ACTION_NONE, ACTION_PM, ACTION_CM,
+    ACTION_NONE, ACTION_PM,
+    # ACTION_CM removed — CM is now auto-handled by environment
 )
 
 MACHINE_CFGS = [
@@ -85,7 +86,9 @@ def test_pm_blocked_when_machine_failed():
         states, [False]*5, make_resource(), RHO_PM, RHO_CM, N_RENEWABLE
     )
     assert not mask[0, ACTION_PM], "PM should be blocked for FAIL machine"
-    assert mask[0, ACTION_CM],     "CM should be allowed for FAIL machine"
+    # CM is auto-handled by env — no CM column in mask
+    # FAIL machine should have noop allowed, PM blocked
+    assert not mask[0, ACTION_PM], "PM blocked for FAIL machine"
     print("PASS: PM blocked, CM allowed for FAIL machine")
 
 
@@ -95,7 +98,8 @@ def test_cm_blocked_when_machine_operational():
     mask = build_agent1_maintenance_mask(
         states, [False]*5, make_resource(), RHO_PM, RHO_CM, N_RENEWABLE
     )
-    assert not mask[0, ACTION_CM], "CM should be blocked for OP machine"
+    # No CM column in mask — CM is automatic
+    assert mask[0, ACTION_PM],     "PM should be allowed for OP idle machine"
     assert mask[0, ACTION_PM],     "PM should be allowed for OP idle machine"
     print("PASS: CM blocked for OP machine")
 
@@ -121,7 +125,8 @@ def test_pm_blocked_when_already_under_maintenance():
         states, [False]*5, make_resource(), RHO_PM, RHO_CM, N_RENEWABLE
     )
     assert not mask[1, ACTION_PM], "PM blocked when already in PM"
-    assert not mask[1, ACTION_CM], "CM blocked when in PM"
+    # CM auto — just check PM blocked when already in PM
+    assert not mask[1, ACTION_PM], "PM blocked when already in PM"
     print("PASS: Both actions blocked for machine already in PM")
 
 

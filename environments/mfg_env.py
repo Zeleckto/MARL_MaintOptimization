@@ -433,7 +433,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             order_actions=self._pending_reorder,
             rho_PM=self.rho_PM,
             rho_CM=self.rho_CM,
-            machines_completing_maint=[],  # TODO: track completing maintenance
+            machines_completing_maint=self._get_machines_completing_maint(old_machine_states),
             rng=self._rng,
         )
 
@@ -457,6 +457,33 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             self.truncations[agent]  = timed_out and not all_done
 
 
+
+
+    def _get_machines_completing_maint(self, old_states) -> list:
+        """
+        Returns machine IDs that completed maintenance this step (PM/CM -> OP).
+        Also recomputes renewable_available from current machine states to
+        prevent drift from any missed freeing events (robust to race conditions).
+        Fixes Bug 4: machines_completing_maint was always [] so renewables
+        were never freed, eventually blocking all future maintenance.
+        """
+        from environments.transitions.degradation import MachineStatus
+        completing = []
+        for old, new_s in zip(old_states, self.machine_states):
+            if (old.status in (MachineStatus.PM, MachineStatus.CM)
+                    and new_s.status == MachineStatus.OP):
+                completing.append(new_s.machine_id)
+
+        # Recompute renewable_available from actual machine states (not deltas)
+        # This is the one source of truth — prevents accumulated drift
+        available = self.resource_state.renewable_capacity.copy()
+        for i, s in enumerate(self.machine_states):
+            if s.status == MachineStatus.PM:
+                available -= self.rho_PM[i, :self.n_renewable].astype(int)
+            elif s.status == MachineStatus.CM:
+                available -= self.rho_CM[i, :self.n_renewable].astype(int)
+        self.resource_state.renewable_available = np.maximum(available, 0)
+        return completing
 
     def _attempt_auto_cm(self) -> int:
         """

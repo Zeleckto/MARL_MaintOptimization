@@ -64,8 +64,8 @@ class CentralizedCritic(nn.Module if TORCH_AVAILABLE else object):
         n_machines = len(config.get("machines", []))
         agent1_obs_dim = MACHINE_FEATURE_DIM * n_machines + res_dim + 5  # +5 job summary
 
-        # Agent 1 action dim (one-hot: n_machines × 3 maintenance actions)
-        action1_dim = n_machines * 3
+        # Agent 1 action dim (one-hot: n_machines × 2 maintenance actions — noop/PM only, CM removed)
+        action1_dim = n_machines * 2
 
         # Input: 3 × hidden (pooled graph) + resource + agent1_obs + action1
         input_dim = 3 * hidden_dim + res_dim + agent1_obs_dim + action1_dim
@@ -122,14 +122,14 @@ class CentralizedCritic(nn.Module if TORCH_AVAILABLE else object):
 
         # One-hot encode Agent 1 maintenance actions
         if action1_maint is not None:
-            # action1_maint: [batch, n_machines] each in {0,1,2}
-            action1_oh = torch.zeros(batch, self.n_machines * 3, device=resource_flat.device)
+            # action1_maint: [batch, n_machines] each in {0=noop, 1=PM}
+            action1_oh = torch.zeros(batch, self.n_machines * 2, device=resource_flat.device)
             for m in range(self.n_machines):
                 action_col = action1_maint[:, m].long()  # [batch]
-                idx = m * 3 + action_col
+                idx = m * 2 + action_col
                 action1_oh.scatter_(1, idx.unsqueeze(1), 1.0)
         else:
-            action1_oh = torch.zeros(batch, self.n_machines * 3, device=resource_flat.device)
+            action1_oh = torch.zeros(batch, self.n_machines * 2, device=resource_flat.device)
 
         global_state = torch.cat([
             h_op, h_machine, h_job,

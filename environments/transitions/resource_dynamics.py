@@ -308,19 +308,9 @@ class ResourceManager:
             # Accumulate ordering cost
             ordering_cost += qty * self.reorder_costs[r]
 
-        # ------------------------------------------------------------------
-        # STEP 5: Free renewable resources from completed maintenance
-        # ------------------------------------------------------------------
-        for m_idx in machines_completing_maint:
-            # We need to know what maintenance type just completed
-            # This is tracked externally — for now free PM amounts
-            # TODO: pass maintenance_type_completing per machine
-            # For now, free rho_PM renewable amounts (conservative)
-            rho = rho_PM[m_idx, :self.n_renewable]
-            state.renewable_available = np.minimum(
-                state.renewable_available + rho.astype(int),
-                state.renewable_capacity
-            )
+        # STEP 5: Renewable freeing handled by mfg_env._get_machines_completing_maint()
+        # which recomputes from machine states each step. Nothing needed here.
+        _ = machines_completing_maint  # kept for API compatibility
 
         # Clip inventory to non-negative (should never go negative if masking works)
         state.consumable_inventory = np.maximum(state.consumable_inventory, 0.0)
@@ -334,29 +324,15 @@ class ResourceManager:
         rho:   np.ndarray,   # [n_renewable + n_consumable] combined requirement vector
     ) -> ResourceState:
         """
-        Deducts resource requirements for one maintenance event.
-        First n_renewable entries are renewable, rest are consumable.
-
-        Args:
-            state: Current ResourceState
-            rho:   Combined requirement vector [n_renewable + n_consumable]
-
-        Returns:
-            Updated ResourceState
+        Deducts CONSUMABLE requirements only.
+        Renewable tracking is owned by mfg_env._get_machines_completing_maint()
+        which recomputes renewable_available from machine states every step.
+        Deducting renewables here causes double-counting (Bug 5 fix).
         """
-        rho_ren = rho[:self.n_renewable].astype(int)
         rho_con = rho[self.n_renewable:].astype(float)
-
-        # Deduct from renewable available capacity
-        state.renewable_available = np.maximum(
-            state.renewable_available - rho_ren, 0
-        )
-
-        # Deduct from consumable inventory
         state.consumable_inventory = np.maximum(
             state.consumable_inventory - rho_con, 0.0
         )
-
         return state
 
 

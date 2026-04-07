@@ -81,7 +81,7 @@ class MAPPOTrainer:
         self.buffer = RolloutBuffer(config)
 
         # Logger
-        log_dir  = config.get("logging", {}).get("tensorboard_dir", "runs/")
+        log_dir  = config.get("logging", {}).get("tensorboard_dir", "outputs/runs/")
         phase    = config.get("stochasticity_level", 1)
         run_name = f"phase{phase}_{int(time.time())}"
         self.logger = Logger(os.path.join(log_dir, run_name))
@@ -92,7 +92,12 @@ class MAPPOTrainer:
         self.rollout_steps = mappo.get("rollout_steps", 2048)
         self.gamma        = mappo.get("gamma", 0.99)
         self.gae_lambda   = mappo.get("gae_lambda", 0.95)
-        self.ckpt_dir     = config.get("logging", {}).get("checkpoint_dir", "checkpoints/")
+        self.ckpt_dir     = config.get("logging", {}).get("checkpoint_dir", "outputs/checkpoints/")
+        self.results_dir  = config.get("logging", {}).get("results_dir",    "outputs/results/")
+        self.log_dir_path = config.get("logging", {}).get("log_dir",        "outputs/logs/")
+        import os as _os
+        for _d in [self.ckpt_dir, self.results_dir, self.log_dir_path]:
+            _os.makedirs(_d, exist_ok=True)
         self.log_every    = config.get("logging", {}).get("log_every_n_episodes", 10)
 
         # State
@@ -212,7 +217,19 @@ class MAPPOTrainer:
         )
 
         # Log per-step
-        self.logger.log_rewards(r1, r2, 0.0, self.global_step)
+        _rs = getattr(self.env, "_last_r_shared", 0.0)
+        self.logger.log_rewards(r1, r2, _rs, self.global_step)
+        # Debug: log resource state every 500 steps
+        if self.global_step % 500 == 0 and hasattr(self.env, "resource_state"):
+            _rstate = self.env.resource_state
+            self.logger.log_scalars(
+                {f"debug/renewable_{i}": float(v)
+                 for i, v in enumerate(_rstate.renewable_available)},
+                self.global_step)
+            self.logger.log_scalars(
+                {f"debug/consumable_{i}": float(v)
+                 for i, v in enumerate(_rstate.consumable_inventory)},
+                self.global_step)
         self.global_step += 1
 
         # Update obs1 for next step
@@ -440,9 +457,10 @@ class MAPPOTrainer:
 
                 # Save milestone checkpoint (permanent snapshot every N steps)
                 milestone_every = self.config.get("logging", {}).get(
-                    "milestone_every_steps", 100_000)
+                    "milestone_every_steps", 50_000)
                 if self.global_step % milestone_every < self.rollout_steps:
-                    tag = f"step_{self.global_step // 1000:04d}k"
+                    _ph = self.config.get("stochasticity_level", 1)
+                    tag = f"phase{_ph}_step_{self.global_step // 1000:04d}k"
                     save_checkpoint(
                         checkpoint_dir = self.ckpt_dir,
                         episode        = self.episode,

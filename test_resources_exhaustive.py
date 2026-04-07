@@ -234,9 +234,11 @@ maint = np.zeros(5,int); maint[0] = 1
 env._step_agent1({"maintenance": maint, "reorder": np.zeros(3)})
 env._step_agent2(0); env._resolve_physics(); env._compute_rewards()
 r1_pm = list(env.rewards.values())[0]
-check("C1: PM action reduces r1 by c_PM",
-      (r1_noop - r1_pm) >= c_PM * 0.75,  # w_hazard changes hazard component too
-      f"r1_noop={r1_noop:.3f} r1_pm={r1_pm:.3f} diff={r1_noop-r1_pm:.3f} expected>={c_PM*0.75:.2f}")
+# C1: PM now gives positive immediate reward (w_pm_bonus=3 > c_PM=1)
+# Verify: r1_PM > r1_noop (PM is strictly better than noop)
+check("C1: PM action improves r1 (w_pm_bonus > c_PM)",
+      r1_pm > r1_noop,
+      f"r1_noop={r1_noop:.3f} r1_pm={r1_pm:.3f} — PM should be better than noop")
 
 # C2: auto-CM charges c_CM to r1
 env.reset(seed=42)

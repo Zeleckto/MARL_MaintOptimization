@@ -156,7 +156,8 @@ mappo:
   gamma:           0.99
   gae_lambda:      0.95
   clip_eps:        0.2
-  entropy_coef:    0.01   # 2-action space converges faster with lower entropy            # 5x higher than default -> prevents early collapse
+  entropy_coef:    0.05   # PHASE 1: higher entropy prevents PM collapse before agent sees benefit
+                          # Reduce to 0.01 for Phase 2/3 once PM behaviour learned
   value_loss_coef: 0.5
   max_grad_norm:   0.5
   rollout_steps:   2048

@@ -105,14 +105,21 @@ def compute_maintenance_reward(
     # c_CM still charges when auto-CM is triggered (real operational cost)
 
     # ── Maintenance action costs (agent only decides noop/PM now) ────────
-    maint_cost = sum(c_PM if a == 1 else 0
-                     for a in maintenance_actions)
+    n_PM       = sum(1 if a == 1 else 0 for a in maintenance_actions)
+    maint_cost = n_PM * c_PM
 
     # ── Resource ordering cost ──────────────────────────────────────────
     resource_cost = delta_obj * ordering_cost
 
     # ── Inventory holding cost (EOQ theory §7.5) ────────────────────────
     holding_cost = w_hold * inventory_total
+
+    # ── PM initiation bonus (immediate signal, fixes PM collapse) ────────────
+    # w_RUL delta_RUL = 0 at PM initiation step (Kijima delay).
+    # w_pm_bonus gives immediate reward so agent learns PM=good before
+    # the deferred RUL benefit becomes visible through the critic.
+    w_pm_bonus  = weights.get("w_pm_bonus", 0.0)
+    pm_bonus    = w_pm_bonus * n_PM
 
     # ── Auto-CM cost ──────────────────────────────────────────────────────────
     auto_cm_cost = c_CM * n_auto_cm
@@ -165,5 +172,5 @@ def compute_maintenance_reward(
 
     r1 = (-maint_cost - resource_cost - holding_cost
           - auto_cm_cost - stockout_penalty - hazard_penalty
-          + rul_bonus + avail_bonus + lam * shared_reward)
+          + pm_bonus + rul_bonus + avail_bonus + lam * shared_reward)
     return float(r1)

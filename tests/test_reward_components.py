@@ -126,11 +126,19 @@ def test_pm_deducts_cost():
     print(f"PASS: PM deducts c_PM=1.0 from reward ({r1_no_maint:.3f} -> {r1_with_pm:.3f})")
 
 def test_cm_deducts_more_than_pm():
+    """Auto-CM (n_auto_cm=1) costs more than PM (action=[1,...]).
+    CM is now environment-initiated — charged via n_auto_cm not action=2."""
     states = make_states()
-    r1_pm = compute_maintenance_reward([1,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
-    r1_cm = compute_maintenance_reward([2,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
-    assert r1_cm < r1_pm
-    print(f"PASS: CM ({r1_cm:.3f}) penalises more than PM ({r1_pm:.3f})")
+    r1_pm      = compute_maintenance_reward([1,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
+    r1_auto_cm = compute_maintenance_reward([0,0,0,0,0], 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS,
+                                             n_auto_cm=1)
+    assert r1_auto_cm < r1_pm, (
+        f"auto-CM ({r1_auto_cm:.3f}) should cost more than PM ({r1_pm:.3f})")
+    c_CM = DEFAULT_WEIGHTS.get("c_CM", 7.0)
+    c_PM = DEFAULT_WEIGHTS.get("c_PM", 1.0)
+    diff = r1_pm - r1_auto_cm
+    assert abs(diff - (c_CM - c_PM)) < 0.01, f"cost diff should be {c_CM-c_PM:.1f}, got {diff:.2f}"
+    print(f"PASS: auto-CM ({r1_auto_cm:.3f}) penalises more than PM ({r1_pm:.3f})")
 
 def test_ordering_cost_deducted():
     states = make_states()

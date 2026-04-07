@@ -104,8 +104,9 @@ class RewardFunction:
             kwargs["inventory_total"] = inventory_total
         if "delta_ruls" in self._maint_params and delta_ruls is not None:
             kwargs["delta_ruls"] = delta_ruls
-        if "n_auto_cm" in self._maint_params:
-            kwargs["n_auto_cm"] = kwargs.pop("n_auto_cm", 0)
+        # n_auto_cm is already in kwargs from the call signature
+        if "n_auto_cm" not in self._maint_params:
+            kwargs.pop("n_auto_cm", None)  # remove if old version of reward fn
         return compute_maintenance_reward(**kwargs)
 
 

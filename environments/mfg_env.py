@@ -191,6 +191,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self._episode_cm          = 0
         self._cm_queue: set      = set()   # machines awaiting auto-CM
         self._auto_cm_count      = 0
+        self._episode_order_cost = 0.0
 
 
     # =========================================================================
@@ -220,6 +221,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self._episode_cm          = 0
         self._cm_queue: set      = set()   # machines awaiting auto-CM
         self._auto_cm_count      = 0
+        self._episode_order_cost = 0.0
 
         # Reset agents
         self.agents = self.possible_agents[:]
@@ -436,6 +438,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             machines_completing_maint=self._get_machines_completing_maint(old_machine_states),
             rng=self._rng,
         )
+        self._episode_order_cost += self._last_ordering_cost
 
         # 5. Phase 3: sample new job arrivals
         new_jobs = self.job_engine.sample_arrivals(

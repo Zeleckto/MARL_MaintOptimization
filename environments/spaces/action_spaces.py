@@ -86,23 +86,35 @@ def build_agent1_reorder_mask(
     Builds reorder action mask for Agent 1.
     Shape: [n_consumable] — True means reordering is ALLOWED.
 
-    Blocks reorder if pending pipeline already covers projected need.
-    Prevents over-ordering reward hacking.
+    FIX (v2): Old implementation used horizon=max_lead_time (=5 steps), which
+    created a safety_stock of only 10 units. Starting inventory (20,15,10) was
+    above this, so the mask was False at training start and the agent could never
+    order. Result: order_cost=0 for all 400k steps, consumables silently depleted,
+    CM eventually blocked.
+
+    New policy: allow ordering when (inventory + pipeline) < safety_stock.
+    safety_stock = rho_CM_max * t_ep_buffer, where t_ep_buffer covers ~one full
+    episode of worst-case failures. Agent is ALWAYS free to order; the w_hold
+    holding cost in the reward function provides incentive not to over-order.
+    This correctly separates the mask (feasibility) from the cost (optimality).
 
     Args:
-        resource_state: Current resource state (contains pending_orders)
-        rho_CM_max:     Max CM consumable requirement per resource
+        resource_state: Current resource state
+        rho_CM_max:     Max CM consumable requirement per resource [n_consumable]
 
     Returns:
-        [n_consumable] bool mask
+        [n_consumable] bool mask — True = ordering is allowed (not over-stocked)
     """
-    from environments.transitions.resource_dynamics import ResourceManager
-    # Use projected need calculation from ResourceState
-    net_need = resource_state.projected_consumable_need(
-        horizon=resource_state.max_lead_time,
-        rho_CM=rho_CM_max,
-    )
-    return net_need > 0.0
+    # safety_stock: enough for ~10 CM events (conservative; 1 episode ≈ 3-5 failures)
+    # Using 10× rho_CM_max ensures we always have a buffer even with high failure rates
+    safety_stock = rho_CM_max * 10
+
+    # Current effective supply = on-hand + in-pipeline
+    pipeline = resource_state.pending_orders.sum(axis=1)
+    effective_supply = resource_state.consumable_inventory + pipeline
+
+    # Allow ordering if below safety stock — agent pays w_hold to discourage excess
+    return effective_supply < safety_stock
 
 
 def build_agent2_valid_actions(

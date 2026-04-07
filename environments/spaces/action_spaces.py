@@ -105,9 +105,10 @@ def build_agent1_reorder_mask(
     Returns:
         [n_consumable] bool mask — True = ordering is allowed (not over-stocked)
     """
-    # safety_stock: enough for ~10 CM events (conservative; 1 episode ≈ 3-5 failures)
-    # Using 10× rho_CM_max ensures we always have a buffer even with high failure rates
-    safety_stock = rho_CM_max * 10
+    # safety_stock: 3 episodes × ~13 units/ep consumption = 39 units per resource
+    # Capped at 40 so agent can always order during the critical learning phase.
+    # Holding cost (w_hold=0.005) discourages over-ordering beyond this.
+    safety_stock = rho_CM_max * 20  # 2*20=40 > all initial inventories → always orderable at start
 
     # Current effective supply = on-hand + in-pipeline
     pipeline = resource_state.pending_orders.sum(axis=1)

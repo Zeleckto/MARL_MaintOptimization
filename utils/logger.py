@@ -146,6 +146,21 @@ class Logger:
             self.writer.add_scalar(tag, value, step)
 
 
+    def log_reward_components(
+        self,
+        ordering_cost:    float,
+        auto_cm_cost:     float,
+        stockout_penalty: float,
+        r_shared:         float,
+        step:             int,
+    ) -> None:
+        """Log per-step reward component breakdown for debugging."""
+        if not self.enabled: return
+        self.writer.add_scalar("reward_components/ordering_cost",    ordering_cost,    step)
+        self.writer.add_scalar("reward_components/auto_cm_cost",     auto_cm_cost,     step)
+        self.writer.add_scalar("reward_components/stockout_penalty", stockout_penalty, step)
+        self.writer.add_scalar("reward_components/r_shared",         r_shared,         step)
+
     def close(self) -> None:
         if self.enabled and self.writer:
             self.writer.close()

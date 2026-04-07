@@ -114,10 +114,36 @@ def compute_maintenance_reward(
     # ── Inventory holding cost (EOQ theory §7.5) ────────────────────────
     holding_cost = w_hold * inventory_total
 
-    # ── Auto-CM cost: charge when environment initiates CM on a failed machine
-    # This makes failure costly without requiring the agent to decide on CM.
-    # c_CM fires once per auto-CM event (matches real cost: parts, technicians)
+    # ── Auto-CM cost ──────────────────────────────────────────────────────────
     auto_cm_cost = c_CM * n_auto_cm
+
+    # ── Continuous hazard penalty (dense PM signal) ──────────────────────────
+    # w_RUL only fires when PM is taken — too sparse when consumables depleted.
+    # w_hazard fires EVERY step proportional to fleet mean hazard rate.
+    # This gives Agent 1 a continuous signal that machine health is declining,
+    # even when PM is momentarily blocked by resource constraints.
+    w_hazard = weights.get("w_hazard", 0.0)
+    hazard_penalty = 0.0
+    if w_hazard > 0 and machine_states is not None:
+        mean_hazard = float(sum(getattr(s, "hazard_rate", 0.0)
+                               for s in machine_states) / max(len(machine_states), 1))
+        hazard_penalty = w_hazard * mean_hazard
+
+    # ── Stockout penalty (Bug 5 fix) ───────────────────────────────────────────
+    # Agent was avoiding all ordering (corner solution) — ordering cost fired
+    # immediately while CM-shortage cost was deferred. Stockout penalty makes
+    # inventory shortfall immediately visible.
+    w_stockout = weights.get("w_stockout", 0.0)
+    stockout_penalty = 0.0
+    if w_stockout > 0 and machine_states is not None:
+        # Penalise each unit below safety stock (= 2 * rho_CM_max per resource)
+        # inventory_total is the sum; approximate per-resource from total
+        # A simpler signal: penalise if any consumable is very low
+        # The resource state is not passed here, so use inventory_total proxy
+        # safety = 20 units total (conservative); penalise shortfall
+        safety = weights.get("safety_stock_total", 20.0)
+        shortfall = max(0.0, safety - inventory_total)
+        stockout_penalty = w_stockout * shortfall
 
     # ── DELTA-RUL fleet signal (design doc §6.2) ────────────────────────
     # mean(ΔRUL_m) across OP machines — fires positive on PM, -1 normally
@@ -137,6 +163,7 @@ def compute_maintenance_reward(
     # w_avail rewards MAINTAINING high availability (level, per design doc)
     avail_bonus = w_avail * compute_system_availability(machine_states)
 
-    r1 = (-maint_cost - resource_cost - holding_cost - auto_cm_cost
+    r1 = (-maint_cost - resource_cost - holding_cost
+          - auto_cm_cost - stockout_penalty - hazard_penalty
           + rul_bonus + avail_bonus + lam * shared_reward)
     return float(r1)

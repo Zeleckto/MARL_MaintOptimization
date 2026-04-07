@@ -79,3 +79,6 @@ kpi_tracker.py
 sanity_check.py
 project.zip
 train_overnight.py
+outputs/
+quick_sanity.py
+

@@ -21,11 +21,11 @@ lambda_shared: 0.3             # fraction of R_shared each agent receives
 # --- Agent 1 (PDM) costs ---------------------------------------------------
 c_PM: 1.0                      # proactive — cheapest
 c_CM: 7.0                      # reactive — 7x PM cost
-delta_obj: 0.5                 # weight on resource ordering cost (eq. 3.14 delta)
+delta_obj: 0.05                # REDUCED 0.5→0.05: ordering cost was dominating PM signal (Bug 4/5)
 
 # --- Agent 1 dense bonuses -------------------------------------------------
 w_avail: 0.5                   # system availability bonus per step (ΔRUL-based)
-w_RUL: 0.05                    # RUL preservation: 0.05 * 35 ΔRUL_shifts = 1.75 ≈ c_PM
+w_RUL: 0.15                    # INCREASED 0.05→0.15: PM signal needs to dominate ordering noise (Bug 4)
 rul_threshold: 0.3             # below this fraction of eta, no RUL bonus
 
 # --- Inventory holding cost (NEW) ------------------------------------------
@@ -33,6 +33,22 @@ rul_threshold: 0.3             # below this fraction of eta, no RUL bonus
 # At steady-state ~12 total units: cost = 0.005*12 = 0.06/step = 9 over 150 steps
 # vs PM savings of c_fail avoided ≈ 25*2 = 50 -> holding cost real but not dominant
 w_hold: 0.005
+
+# --- Stockout penalty (NEW, Bug 5 fix) ----------------------------------------
+# Agent was learning to never order (corner solution) because ordering cost
+# penalty (delta_obj * qty * price) fired immediately while CM cost was deferred.
+# Stockout penalty fires when inventory < safety_stock = rho_CM_max per resource
+# w_stockout = 3.0: 1 unit short costs 3x the holding cost per step
+# This creates a floor demand for ordering without over-penalising large orders
+w_stockout: 3.0
+
+# --- Continuous hazard penalty (dense PM incentive, Bug 3/4 fix) -----------
+# Fires every step proportional to mean fleet hazard rate.
+# Provides dense PM signal even when PM is blocked by resource constraints.
+# Calibration: mean_hazard ≈ 0.005/shift at healthy fleet → 0.5 * 0.005 = 0.0025/step
+# At h=50% (PM threshold): hazard ≈ 0.03 → penalty = 0.5 * 0.03 = 0.015/step
+# This grows fast enough to motivate PM before failure while staying < avail_bonus
+w_hazard: 0.5
 
 # --- Idle-FAIL penalty -------------------------------------------------------
 # Fires every step a machine sits in FAIL without CM being initiated.

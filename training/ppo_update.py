@@ -159,7 +159,12 @@ def ppo_update(
                 elif act < exp: gs = torch.cat([gs, torch.zeros(batch, exp - act, device=dev1)], 1)
 
                 v_pred  = critic.net(gs).squeeze(-1)
-                c_loss  = F.mse_loss(v_pred, ret1.clamp(-500, 500))
+                # Normalise returns so critic loss stays in [0, 10] range
+                # Raw returns can be -1000 to +100 -> MSE = 100^2 (Bug 3 fix)
+                ret_mean = ret1.mean(); ret_std = ret1.std().clamp(min=1.0)
+                ret_norm = (ret1 - ret_mean) / ret_std
+                v_norm   = (v_pred - ret_mean) / ret_std
+                c_loss   = F.mse_loss(v_norm, ret_norm.clamp(-10, 10))
 
                 optim_critic.zero_grad()
                 c_loss.backward()

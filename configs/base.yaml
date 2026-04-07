@@ -117,21 +117,21 @@ resources:
   consumable:
     - resource_id: 3
       name: Spare Parts
-      initial_inventory: 20
+      initial_inventory: 30   # increased 20→30: covers 2+ episodes of CM+PM without ordering
       lead_time_shifts: 5
       reorder_cost: 10.0
       reorder_point: 8          # (Q,R) baseline ROP: order when inv < 8
       reorder_qty: 12           # order 12 units (covers ~6 CM events)
     - resource_id: 4
       name: Lubricants
-      initial_inventory: 15
+      initial_inventory: 25   # increased 15→25: covers 2+ episodes
       lead_time_shifts: 3
       reorder_cost: 5.0
       reorder_point: 6
       reorder_qty: 10
     - resource_id: 5
       name: Consumable Tools
-      initial_inventory: 10
+      initial_inventory: 30   # increased 10→30: was depleting mid-ep-1, blocking PM for entire rollout
       lead_time_shifts: 4
       reorder_cost: 8.0
       reorder_point: 6          # order early — Consumable Tools depletes fastest
@@ -160,7 +160,7 @@ mappo:
   value_loss_coef: 0.5
   max_grad_norm:   0.5
   rollout_steps:   2048
-  ppo_epochs:      5
+  ppo_epochs:      10
   minibatch_size:  64
 
 # --- TGIN (Agent 2 policy network) -------------------------------------------

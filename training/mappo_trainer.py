@@ -103,6 +103,12 @@ class MAPPOTrainer:
         # State
         self.global_step  = 0
         self.episode      = 0
+        self._ep_steps    = 0   # steps in current episode
+        self._ep_r1       = 0.0 # r1 accumulated in current episode
+        self._ep_r2       = 0.0
+        # Running reward statistics for normalisation (Bug 3 fix)
+        self._r1_mean = 0.0; self._r1_var = 1.0; self._r1_n = 0
+        self._r2_mean = 0.0; self._r2_var = 1.0; self._r2_n = 0
         self.obs1:        Optional[np.ndarray] = None
         self.last_action1: Optional[dict]      = None
         self._last_trunc  = False
@@ -216,6 +222,18 @@ class MAPPOTrainer:
             truncated= trunc,
         )
 
+        # Per-episode tracking (Bug 6 fix)
+        self._ep_steps += 1
+        self._ep_r1    += r1
+        self._ep_r2    += r2
+        # Running stats update (Welford online, Bug 3 fix)
+        for val, attr in [(r1, "_r1"), (r2, "_r2")]:
+            n_attr = attr + "_n"; m_attr = attr + "_mean"; v_attr = attr + "_var"
+            n = getattr(self, n_attr) + 1; setattr(self, n_attr, n)
+            mean = getattr(self, m_attr); var = getattr(self, v_attr)
+            delta = val - mean; new_mean = mean + delta/n
+            new_var = var + (delta * (val - new_mean) - var) / max(n, 2)
+            setattr(self, m_attr, new_mean); setattr(self, v_attr, max(new_var, 1e-4))
         # Log per-step
         _rs = getattr(self.env, "_last_r_shared", 0.0)
         self.logger.log_rewards(r1, r2, _rs, self.global_step)
@@ -305,8 +323,8 @@ class MAPPOTrainer:
                         print(
                             f"  ep={self.episode:>5} | "
                             f"step={self.global_step:>8,} | "
-                            f"r1={self.buffer.episode_r1:>+8.1f} | "
-                            f"r2={self.buffer.episode_r2:>+8.1f} | "
+                            f"r1={self._ep_r1:>+8.1f} | "
+                            f"r2={self._ep_r2:>+8.1f} | "
                             f"failures={self.env._episode_failures:>3} | "
                             f"done={self.env._episode_completions:>3}jobs | "
                             f"health={avg_health:.1f}%"
@@ -367,9 +385,9 @@ class MAPPOTrainer:
 
                     self.logger.log_episode(
                         episode          = self.episode,
-                        episode_return1  = self.buffer.episode_r1,
-                        episode_return2  = self.buffer.episode_r2,
-                        episode_length   = self.buffer.episode_steps,
+                        episode_return1  = self._ep_r1,
+                        episode_return2  = self._ep_r2,
+                        episode_length   = self._ep_steps,
                         n_failures       = n_F,
                         weighted_tard    = tard_val,
                         n_jobs_completed = self.env._episode_completions,
@@ -391,7 +409,10 @@ class MAPPOTrainer:
                         total_cost       = total_cost,
                     )
 
-                    self.episode += 1
+                    self.episode    += 1
+                    self._ep_steps   = 0
+                    self._ep_r1      = 0.0
+                    self._ep_r2      = 0.0
                     self._reset_env()
 
             # ── GAE with proper bootstrap ──────────────────────────────────

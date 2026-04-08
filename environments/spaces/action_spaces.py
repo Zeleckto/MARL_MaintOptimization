@@ -66,9 +66,13 @@ def build_agent1_maintenance_mask(
     for i, s in enumerate(machine_states):
         mask[i, ACTION_NONE] = True          # noop always valid
 
-        # PM: machine must be OP, not currently processing a job, resources ok
+        # PM: machine must be OP, not busy, resources ok, AND health < 75%
+        # Health gate matches mfg_env._step_agent1 hard constraint.
+        # Adding it here means the policy network learns "PM not available at h>75"
+        # instead of outputting PM actions that get silently rejected.
         if (s.status == MachineStatus.OP
                 and not machine_busy[i]
+                and s.health < 75
                 and resource_state.can_do_maintenance(
                     rho_PM[i, :n_renewable].astype(int),
                     rho_PM[i, n_renewable:]

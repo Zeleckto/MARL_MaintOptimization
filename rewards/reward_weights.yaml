@@ -1,39 +1,26 @@
-# rewards/reward_weights.yaml  v3 CLEAN
-# =========================================
-# Clean separation: PM incentives SEPARATE from inventory incentives.
-# Previous design had stockout_penalty fighting pm_bonus — PM depleted inventory
-# triggering stockout, which made PM the cause of huge penalties.
+# rewards/reward_weights.yaml — FINAL
+# =====================================
+# PM gated by h<75 hard mask in env. No pm_bonus needed.
+# ΔRUL at 0.03 provides deferred credit at PM completion.
+# Agent learns WHEN within 0-75% to PM — the real decision.
 
-# Failure costs (literature ratio 1:7:25)
-c_fail:            25.0
-c_PM:               1.0
-c_CM:               7.0
-criticality_multiplier: 5.0
-lambda_shared:      0.3
+# Shared signal
+c_fail: 25.0
+lambda_shared: 0.4
+w_comp_shared: 1.0
 
-# PM incentives (Agent 1)
-w_pm_bonus:         5.0   # health-conditional: bonus=w_pm_bonus*(1-h/100)
-                          # breakeven at h=80% (5*(1-0.8)=1.0=c_PM)
-                          # zero at h=100 (no spam), max at h=0
-w_RUL:              0.15  # dense RUL preservation bonus per step during PM
-w_hazard:           0.5   # continuous hazard penalty motivates PM before failure
-w_avail:            0.5   # availability bonus each step machine is OP
-rul_threshold:      0.3
+# Agent 1 costs
+c_PM: 1.0
+c_CM: 7.0
+delta_obj: 0.05
+w_hold: 0.005
 
-# Inventory incentives (Agent 1) — SEPARATE from PM incentives
-delta_obj:          0.05  # small ordering cost (was 0.5 — was crushing PM signal)
-w_hold:             0.005 # holding cost keeps inventory from flooding
-w_reorder_bonus:    0.5   # reward per unit ordered when inv below ROP
-                          # This pulls agent toward ordering without punishing PM
+# Agent 1 PM signal
+w_pm_bonus: 0.0                # hard mask at h<75 prevents spam; bonus not needed
+w_RUL: 0.03                   # deferred credit: 0.03 × 26 = +0.78 at PM completion
 
-# w_stockout REMOVED: was creating catch-22 — PM depleted inventory,
-# stockout punished PM, agent learned to never PM. Never add it back.
-
-# Agent 2 (Job Shop)
-alpha:              1.0
-w_tard:             1.0
-w_comp:             3.0
-w_health:           0.5
-w_slack:            0.1
-beta_makespan:      0.2
-gamma_obj:          1.0
+# Agent 2 scheduling
+alpha: 1.0
+w_tard: 5.0
+w_comp: 3.0
+w_health: 0.5

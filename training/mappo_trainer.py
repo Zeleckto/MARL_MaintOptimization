@@ -190,7 +190,12 @@ class MAPPOTrainer:
         sem2, idx2, logp2, ent2 = self.agent2.act(obs2, valid_pairs)
 
         # Value after Agent 1 acted (post-action, pre-Agent2)
-        v2 = self._estimate_value(action1_maint=action1["maintenance"])
+        # FIX: Agent 2 has NO critic — using Agent 1's critic gave random
+        # advantages because V1 predicts r1 returns (maintenance), not r2
+        # returns (scheduling). With v2=0, Agent 2 uses pure discounted
+        # returns (MC) for advantages. Higher variance but CORRECT direction.
+        # Agent 2 will now actually learn from completion bonuses.
+        v2 = 0.0
 
         # Apply Agent 2 action
         self.env._step_agent2(idx2)
@@ -416,20 +421,22 @@ class MAPPOTrainer:
                     self._reset_env()
 
             # ── GAE with proper bootstrap ──────────────────────────────────
-            # CRITICAL: terminated = V=0 (no future), truncated = V(s_T) > 0
+            # Agent 1: critic estimate if truncated, 0 if terminated.
+            # Agent 2: always 0 — critic is trained on r1 returns only,
+            # using it for Agent 2 corrupts its advantages.
             if trunc:
-                # Hit T_max — bootstrap from critic estimate
-                last_v = self._estimate_value(
+                last_v1 = self._estimate_value(
                     action1_maint=self.last_action1["maintenance"]
                     if self.last_action1 else None
                 )
+                last_v2 = 0.0
             else:
-                # All jobs done — no future value
-                last_v = 0.0
+                last_v1 = 0.0
+                last_v2 = 0.0
 
             self.buffer.compute_gae(
-                last_value1 = last_v,
-                last_value2 = last_v,
+                last_value1 = last_v1,
+                last_value2 = last_v2,
                 gamma       = self.gamma,
                 gae_lambda  = self.gae_lambda,
             )

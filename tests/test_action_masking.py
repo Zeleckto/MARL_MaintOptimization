@@ -69,6 +69,13 @@ JOB_CONFIG = {
 def make_states():
     return build_machine_states(MACHINE_CFGS)
 
+def make_degraded_states(health=70.0):
+    """States with low health so PM is allowed (h<75 gate)."""
+    states = build_machine_states(MACHINE_CFGS)
+    for s in states:
+        s.health = health
+    return states
+
 def make_resource():
     return ResourceManager(RESOURCE_CONFIG).reset()
 
@@ -94,26 +101,25 @@ def test_pm_blocked_when_machine_failed():
 
 def test_cm_blocked_when_machine_operational():
     """Cannot initiate CM on a healthy machine."""
-    states = make_states()
+    states = make_degraded_states(70.0)  # h<75 so PM is allowed
     mask = build_agent1_maintenance_mask(
         states, [False]*5, make_resource(), RHO_PM, RHO_CM, N_RENEWABLE
     )
     # No CM column in mask — CM is automatic
-    assert mask[0, ACTION_PM],     "PM should be allowed for OP idle machine"
-    assert mask[0, ACTION_PM],     "PM should be allowed for OP idle machine"
-    print("PASS: CM blocked for OP machine")
+    assert mask[0, ACTION_PM],     "PM should be allowed for OP idle degraded machine"
+    print("PASS: PM allowed for degraded OP machine, CM is automatic")
 
 
 def test_pm_blocked_when_machine_busy():
     """Cannot PM a machine that is currently processing a job."""
-    states = make_states()
+    states = make_degraded_states(70.0)  # h<75 so PM would be allowed if idle
     machine_busy = [False]*5
     machine_busy[2] = True   # machine 2 is processing
     mask = build_agent1_maintenance_mask(
         states, machine_busy, make_resource(), RHO_PM, RHO_CM, N_RENEWABLE
     )
     assert not mask[2, ACTION_PM], "PM should be blocked when machine is busy"
-    assert mask[0, ACTION_PM],     "PM should be allowed for idle machine"
+    assert mask[0, ACTION_PM],     "PM should be allowed for idle degraded machine"
     print("PASS: PM blocked when machine is busy")
 
 

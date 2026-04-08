@@ -156,13 +156,13 @@ mappo:
   gamma:           0.99
   gae_lambda:      0.95
   clip_eps:        0.2
-  entropy_coef:    0.05   # PHASE 1: higher entropy prevents PM collapse before agent sees benefit
+  entropy_coef:    0.1   # PHASE 1: higher entropy prevents PM collapse before agent sees benefit
                           # Reduce to 0.01 for Phase 2/3 once PM behaviour learned
   value_loss_coef: 0.5
   max_grad_norm:   0.5
   rollout_steps:   2048
-  ppo_epochs:      10
-  minibatch_size:  64
+  ppo_epochs:      5
+  minibatch_size:  32
 
 # --- TGIN (Agent 2 policy network) -------------------------------------------
 tgin:
@@ -222,6 +222,6 @@ logging:
   results_dir:            "outputs/results/"     # baselines, ablations, paper tables
   log_dir:                "outputs/logs/"        # training_log.txt
 
-  checkpoint_every_steps:   50000  # overwrite outputs/checkpoints/latest.pt
+  checkpoint_every_steps:   25000 # overwrite outputs/checkpoints/latest.pt
   milestone_every_steps:    50000  # ALSO save phaseN_step_050k.pt every 50k
   log_every_n_episodes:     10

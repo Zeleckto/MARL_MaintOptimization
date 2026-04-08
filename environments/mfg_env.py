@@ -324,10 +324,36 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         # Store for reward computation
         self._last_maintenance_actions = maintenance.tolist()
 
-        # Apply maintenance actions — update machine statuses immediately
-        # (degradation.tick will handle the actual state transitions)
-        # For now, mark which machines Agent 1 wants to maintain
-        # (will be applied in physics resolution)
+        # ═══ FIX-P1: Apply PM immediately + consume resources ═══════════
+        # Set machine status to PM RIGHT NOW so Agent 2's valid pairs exclude
+        # PM'd machines. Previously PM was deferred → Agent 2 assigned jobs
+        # to machines Agent 1 just sent to PM.
+        self._pm_applied_this_step = [False] * self.n_machines
+        from environments.transitions.degradation import MachineStatus
+        for m_idx, act in enumerate(maintenance):
+            if act == 1 and self.machine_states[m_idx].status == MachineStatus.OP:
+                # Hard health gate: cannot PM machines above 75% health.
+                # At h<75, machines are genuinely degraded (Weibull hazard rising).
+                # This caps PM at ~12/episode even with aggressive policy,
+                # consuming only 3% of capacity (vs 31% without gate).
+                # Agent learns WHEN within 0-75% to PM — the real decision.
+                if not self.machine_busy[m_idx] and self.machine_states[m_idx].health < 75:
+                    ren = self.rho_PM[m_idx, :self.n_renewable].astype(int)
+                    con = self.rho_PM[m_idx, self.n_renewable:]
+                    if self.resource_state.can_do_maintenance(ren, con):
+                        self.machine_states[m_idx].status = MachineStatus.PM
+                        self.machine_states[m_idx].maint_steps_remaining = (
+                            self.machine_states[m_idx].tau_PM_shifts)
+                        self.resource_state.consumable_inventory = np.maximum(
+                            self.resource_state.consumable_inventory - con, 0.0)
+                        self._pm_applied_this_step[m_idx] = True
+                        self._episode_pm += 1  # Count here — applied here
+
+        # Store ACTUAL applied actions (not raw requested) for reward computation.
+        # Without this, agent gets charged c_PM for PMs that were blocked by h<75 gate.
+        self._last_maintenance_actions = [1 if applied else 0
+                                          for applied in self._pm_applied_this_step]
+
         self._pending_maintenance = maintenance
         self._pending_reorder     = reorder
 
@@ -380,11 +406,15 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         _prev_ruls = [s.rul for s in self.machine_states]  # RUL before physics
 
         # 1. Weibull degradation + maintenance state transitions
+        # PM is FULLY handled in _step_agent1 (with health gate + resource consumption).
+        # Pass 0 for ALL machines to tick_all — it should NEVER initiate PM.
+        # tick_all still handles: degradation, PM/CM countdown, failure detection.
+        adjusted_maint = [0] * self.n_machines
         self.machine_states = self.degradation_engine.tick_all(
             machine_states=self.machine_states,
             operating_flags=self.machine_busy[:],
             rng=self._rng,
-            actions_maintenance=self._pending_maintenance.tolist(),
+            actions_maintenance=adjusted_maint,
         )
 
         # Compute ΔRUL fleet signal (design doc §6.2): RUL_after - RUL_before per machine
@@ -418,6 +448,11 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             self._episode_failures += len(newly_failed)
             # Queue these machines for automatic CM
             self._cm_queue.update(newly_failed)
+            # ═══ FIX-P0: Clear machine_busy for failed machines ═══
+            # Without this, machines stay "busy" forever after failure.
+            # By step 78, 4/5 machines are stuck → factory paralyzed.
+            for m_id in newly_failed:
+                self.machine_busy[m_id] = False
         self._newly_failed = newly_failed
 
         # Auto-CM: attempt to start CM for all queued machines
@@ -432,9 +467,12 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
                 self._episode_cm += 1
 
         # 4. Resource dynamics (inventory update + pipeline shift)
+        # Skip PMs already consumed in _step_agent1
+        # PM resources already consumed in _step_agent1. Pass 0 to avoid double-count.
+        resource_maint = [0] * self.n_machines
         self.resource_state, self._last_ordering_cost = self.resource_manager.step(
             state=self.resource_state,
-            maintenance_actions=self._pending_maintenance.tolist(),
+            maintenance_actions=resource_maint,
             order_actions=self._pending_reorder,
             rho_PM=self.rho_PM,
             rho_CM=self.rho_CM,

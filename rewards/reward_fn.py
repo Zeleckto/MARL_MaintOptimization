@@ -65,6 +65,7 @@ class RewardFunction:
         self,
         newly_failed:        List[int],
         machine_criticality: Dict[int, float],
+        n_completions:       int = 0,
     ) -> float:
         """Calls compute_shared_reward with only the params it accepts."""
         kwargs = {
@@ -76,6 +77,10 @@ class RewardFunction:
                 "criticality_multiplier", 5.0)
         if "machine_criticality" in self._shared_params:
             kwargs["machine_criticality"] = machine_criticality
+        if "n_completions" in self._shared_params:
+            kwargs["n_completions"] = n_completions
+        if "w_comp_shared" in self._shared_params:
+            kwargs["w_comp_shared"] = self.weights.get("w_comp_shared", 1.0)
         return compute_shared_reward(**kwargs)
 
 
@@ -179,7 +184,10 @@ class RewardFunction:
             n_pending_ops,
         )
 
-        r_shared = self._call_shared(newly_failed_machine_ids, machine_criticality)
+        r_shared = self._call_shared(
+            newly_failed_machine_ids, machine_criticality,
+            n_completions=len(completed_job_ids),
+        )
         r1 = self._call_maintenance(
             maintenance_actions, ordering_cost, machine_states,
             r_shared, inventory_total, delta_ruls=delta_ruls,

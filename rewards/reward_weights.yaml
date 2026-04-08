@@ -1,78 +1,39 @@
-# rewards/reward_weights.yaml
-# ============================
-# All reward coefficients. Never hardcode these in Python.
-# Edit here to retune without touching any .py files.
-#
-# Aligned with MARL_EnvironmentDesign_v2.docx Table 1.1 (April 2026)
-# Changes vs v0:
-#   c_CM:   3.0 -> 7.0   (literature ratio c_PM:c_CM:c_fail = 1:7:25)
-#   c_fail: 30.0 -> 25.0 (literature ratio)
-#   w_RUL:  0.5  -> 0.05  (calibrated: 0.05*35 ΔRUL_shifts = 1.75 ≈ c_PM=1)
-#   w_avail: 2.0 -> 0.5   (ΔRUL-based signal, not absolute level)
-#   w_hold: NEW  = 0.005  (EOQ holding cost — prevents inventory flooding)
+# rewards/reward_weights.yaml  v3 CLEAN
+# =========================================
+# Clean separation: PM incentives SEPARATE from inventory incentives.
+# Previous design had stockout_penalty fighting pm_bonus — PM depleted inventory
+# triggering stockout, which made PM the cause of huge penalties.
 
-# --- Failure penalty -------------------------------------------------------
-# c_PM:c_CM:c_fail = 1:7:25  (Pintelon & Parodi-Herz 2008)
-# CM/PM ratio 5-8x typical in literature. Unplanned failure 15-40x PM.
-c_fail: 25.0
-criticality_multiplier: 5.0    # bottleneck machine: penalty *= (1 + 5*crit)
-lambda_shared: 0.3             # fraction of R_shared each agent receives
+# Failure costs (literature ratio 1:7:25)
+c_fail:            25.0
+c_PM:               1.0
+c_CM:               7.0
+criticality_multiplier: 5.0
+lambda_shared:      0.3
 
-# --- Agent 1 (PDM) costs ---------------------------------------------------
-c_PM: 1.0                      # proactive — cheapest
-c_CM: 7.0                      # reactive — 7x PM cost
-delta_obj: 0.05                # REDUCED 0.5→0.05: ordering cost was dominating PM signal (Bug 4/5)
+# PM incentives (Agent 1)
+w_pm_bonus:         5.0   # health-conditional: bonus=w_pm_bonus*(1-h/100)
+                          # breakeven at h=80% (5*(1-0.8)=1.0=c_PM)
+                          # zero at h=100 (no spam), max at h=0
+w_RUL:              0.15  # dense RUL preservation bonus per step during PM
+w_hazard:           0.5   # continuous hazard penalty motivates PM before failure
+w_avail:            0.5   # availability bonus each step machine is OP
+rul_threshold:      0.3
 
-# --- Agent 1 dense bonuses -------------------------------------------------
-w_avail: 0.5                   # system availability bonus per step (ΔRUL-based)
-w_RUL: 0.15                    # INCREASED 0.05→0.15: PM signal needs to dominate ordering noise (Bug 4)
-rul_threshold: 0.3             # below this fraction of eta, no RUL bonus
+# Inventory incentives (Agent 1) — SEPARATE from PM incentives
+delta_obj:          0.05  # small ordering cost (was 0.5 — was crushing PM signal)
+w_hold:             0.005 # holding cost keeps inventory from flooding
+w_reorder_bonus:    0.5   # reward per unit ordered when inv below ROP
+                          # This pulls agent toward ordering without punishing PM
 
-# --- Inventory holding cost (NEW) ------------------------------------------
-# Consistent with EOQ theory: prevents agent flooding inventory
-# At steady-state ~12 total units: cost = 0.005*12 = 0.06/step = 9 over 150 steps
-# vs PM savings of c_fail avoided ≈ 25*2 = 50 -> holding cost real but not dominant
-w_hold: 0.005
+# w_stockout REMOVED: was creating catch-22 — PM depleted inventory,
+# stockout punished PM, agent learned to never PM. Never add it back.
 
-# --- Stockout penalty (NEW, Bug 5 fix) ----------------------------------------
-# Agent was learning to never order (corner solution) because ordering cost
-# penalty (delta_obj * qty * price) fired immediately while CM cost was deferred.
-# Stockout penalty fires when inventory < safety_stock = rho_CM_max per resource
-# w_stockout = 3.0: 1 unit short costs 3x the holding cost per step
-# This creates a floor demand for ordering without over-penalising large orders
-w_stockout: 3.0
-
-# --- Continuous hazard penalty (dense PM incentive, Bug 3/4 fix) -----------
-# Fires every step proportional to mean fleet hazard rate.
-# Provides dense PM signal even when PM is blocked by resource constraints.
-# Calibration: mean_hazard ≈ 0.005/shift at healthy fleet → 0.5 * 0.005 = 0.0025/step
-# At h=50% (PM threshold): hazard ≈ 0.03 → penalty = 0.5 * 0.03 = 0.015/step
-# This grows fast enough to motivate PM before failure while staying < avail_bonus
-w_hazard: 0.5
-
-# --- PM initiation bonus (direct fix for PM collapse) -------------------
-# w_RUL fires zero at PM initiation (Kijima delta_RUL=0 this step).
-# PM benefit is deferred 50+ steps (preventing future failure).
-# With gamma=0.99^50 discounting, agent needs an immediate signal.
-# +3.0 per PM: PM net = -c_PM + w_pm_bonus = -1+3 = +2 immediately.
-# This is economically justified: PM costs 1, CM costs 7 → PM worth 3.
-w_pm_bonus: 3.0
-
-# --- Idle-FAIL penalty -------------------------------------------------------
-# Fires every step a machine sits in FAIL without CM being initiated.
-# Makes CM recovery benefit immediately visible to Agent 1.
-# w_fail_idle=2.0: 3 failed machines = -6/step penalty vs c_CM=7 one-time cost
-#   => agent pays back c_CM cost in ~3-4 steps = strong CM incentive
-# w_fail_idle removed — CM is now automatic, not agent-decided
-
-# --- Agent 2 (Job Shop) weights --------------------------------------------
-alpha: 1.0                     # tardiness weight (eq. 3.14 alpha)
-w_tard: 1.0                    # normalised tardiness penalty (reduced from 5→1: r1/r2 balance)
-w_comp: 3.0                    # job completion bonus per job finished this step
-w_health: 0.5                  # health-aware dispatch bonus per assignment
-w_slack: 0.1                   # slack signal: n_jobs_on_track/J per step (design doc §6.5)
-beta_makespan: 0.2             # running makespan estimate penalty (eq. 3.14 beta)
-
-# --- Objective scalarisation (paper reporting, eq. 3.14) ------------------
-# Not used in reward computation — used in benchmarks/metrics.py
-gamma_obj: 1.0
+# Agent 2 (Job Shop)
+alpha:              1.0
+w_tard:             1.0
+w_comp:             3.0
+w_health:           0.5
+w_slack:            0.1
+beta_makespan:      0.2
+gamma_obj:          1.0

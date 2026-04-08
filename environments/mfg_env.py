@@ -374,6 +374,9 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         """
         # Save old states for failure detection AND ΔRUL computation (design doc §6.2)
         old_machine_states = copy.deepcopy(self.machine_states)
+        # Save health BEFORE tick_all so pm_bonus sees real degradation
+        # (tick_all resets health=100 on PM initiation via _recompute_derived)
+        self._pre_tick_health = [s.health for s in self.machine_states]
         _prev_ruls = [s.rul for s in self.machine_states]  # RUL before physics
 
         # 1. Weibull degradation + maintenance state transitions
@@ -541,8 +544,16 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
                     for m in op.eligible_machines:
                         eligible_map.setdefault(m, []).append((job.job_id, op.op_idx))
 
+        # Compute reorder bonus inputs
+        _units_ordered = float(self._pending_reorder.sum())
+        _inv_below_rop = any(
+            self.resource_state.consumable_inventory[i] <
+            float(self.config['resources']['consumable'][i].get('reorder_point', 6))
+            for i in range(len(self.config['resources']['consumable']))
+        )
         r1, r2, r_shared = self.reward_fn.compute(
             maintenance_actions      = self._last_maintenance_actions,
+            pre_maint_health         = getattr(self, "_pre_tick_health", None),
             ordering_cost            = self._last_ordering_cost,
             machine_states           = self.machine_states,
             newly_failed_machine_ids = self._newly_failed,
@@ -556,6 +567,8 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
                 self.resource_state.consumable_inventory.sum()),
             delta_ruls               = getattr(self, "_delta_ruls", None),
             n_auto_cm                = getattr(self, "_auto_cm_count", 0),
+            units_ordered            = _units_ordered,
+            inv_below_rop            = _inv_below_rop,
         )
         self.rewards[AGENT_PDM]     = r1
         self.rewards[AGENT_JOBSHOP] = r2

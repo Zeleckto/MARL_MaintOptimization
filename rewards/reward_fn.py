@@ -88,6 +88,9 @@ class RewardFunction:
         inventory_total:     float,
         delta_ruls:          Optional[List[float]] = None,
         n_auto_cm:           int = 0,
+        units_ordered:       float = 0.0,
+        inv_below_rop:       bool  = False,
+        pre_maint_health:    list  = None,
     ) -> float:
         """Calls compute_maintenance_reward with only the params it accepts."""
         kwargs = {
@@ -106,7 +109,13 @@ class RewardFunction:
             kwargs["delta_ruls"] = delta_ruls
         # n_auto_cm is already in kwargs from the call signature
         if "n_auto_cm" not in self._maint_params:
-            kwargs.pop("n_auto_cm", None)  # remove if old version of reward fn
+            kwargs.pop("n_auto_cm", None)
+        if "units_ordered" in self._maint_params:
+            kwargs["units_ordered"] = units_ordered
+        if "inv_below_rop" in self._maint_params:
+            kwargs["inv_below_rop"] = inv_below_rop
+        if "pre_maint_health" in self._maint_params and pre_maint_health is not None:
+            kwargs["pre_maint_health"] = pre_maint_health
         return compute_maintenance_reward(**kwargs)
 
 
@@ -157,6 +166,9 @@ class RewardFunction:
         inventory_total:          float = 0.0,
         delta_ruls:               Optional[List[float]] = None,
         n_auto_cm:                int = 0,
+        units_ordered:            float = 0.0,
+        inv_below_rop:            bool  = False,
+        pre_maint_health:         list = None,
     ) -> Tuple[float, float, float]:
         """Computes r1, r2, R_shared for one timestep."""
 
@@ -172,6 +184,8 @@ class RewardFunction:
             maintenance_actions, ordering_cost, machine_states,
             r_shared, inventory_total, delta_ruls=delta_ruls,
             n_auto_cm=n_auto_cm,
+            units_ordered=units_ordered, inv_below_rop=inv_below_rop,
+            pre_maint_health=pre_maint_health,
         )
         r2 = self._call_scheduling(
             jobs, completed_job_ids, assignment,

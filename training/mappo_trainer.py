@@ -167,6 +167,14 @@ class MAPPOTrainer:
             (done: bool, truncated: bool)
         """
         # ── Agent 1 half-step ──────────────────────────────────────────────
+        # Build mask BEFORE action — must match what agent1.act() sees
+        from environments.spaces.action_spaces import build_agent1_maintenance_mask
+        maint_mask_np = build_agent1_maintenance_mask(
+            self.env.machine_states, self.env.machine_busy,
+            self.env.resource_state, self.env.rho_PM, self.env.rho_CM,
+            self.env.n_renewable
+        )
+
         action1, logp1, ent1 = self.agent1.act(
             obs_np         = self.obs1,
             machine_states = self.env.machine_states,
@@ -212,6 +220,7 @@ class MAPPOTrainer:
         self._last_trunc = trunc
 
         # ── Store transition ───────────────────────────────────────────────
+        # maint_mask_np was built at top of this method, BEFORE agent1.act()
         self.buffer.add(
             obs1     = self.obs1.copy(),
             action1  = action1,
@@ -225,6 +234,7 @@ class MAPPOTrainer:
             v2       = v2,
             done     = done,
             truncated= trunc,
+            mask1    = maint_mask_np,
         )
 
         # Per-episode tracking (Bug 6 fix)

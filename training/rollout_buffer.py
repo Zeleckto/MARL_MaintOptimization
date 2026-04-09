@@ -40,6 +40,7 @@ class AgentBuffer:
         self.values    = []   # V(s_t) from critic
         self.dones     = []   # True if episode ended (term OR trunc)
         self.truncated = []   # True if episode TRUNCATED (not terminated)
+        self.masks     = []   # action masks (for masked PPO update)
         self.advantages = []
         self.returns    = []
 
@@ -52,12 +53,14 @@ class AgentBuffer:
         value:    float,
         done:     bool,
         truncated: bool = False,
+        mask=None,
     ):
         self.obs.append(obs)
         self.actions.append(action)
         self.log_probs.append(log_prob)
         self.rewards.append(reward)
         self.values.append(value)
+        self.masks.append(mask)
         self.dones.append(done)
         self.truncated.append(truncated)
 
@@ -139,6 +142,7 @@ class AgentBuffer:
                 "advantages": self.advantages[batch_idx],
                 "returns":    self.returns[batch_idx],
                 "values":     np.array([self.values[i] for i in batch_idx], dtype=np.float32),
+                "masks":      [self.masks[i] for i in batch_idx],
             }
 
     def __len__(self):
@@ -174,9 +178,10 @@ class RolloutBuffer:
         obs2,   action2,   logp2:   float, r2: float, v2: float,
         done:   bool,
         truncated: bool = False,
+        mask1=None, mask2=None,
     ):
-        self.buffer1.add(obs1, action1, logp1, r1, v1, done, truncated)
-        self.buffer2.add(obs2, action2, logp2, r2, v2, done, truncated)
+        self.buffer1.add(obs1, action1, logp1, r1, v1, done, truncated, mask=mask1)
+        self.buffer2.add(obs2, action2, logp2, r2, v2, done, truncated, mask=mask2)
         self.episode_r1    += r1
         self.episode_r2    += r2
         self.episode_steps += 1

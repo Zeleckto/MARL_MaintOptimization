@@ -60,8 +60,17 @@ def ppo_update(
                 old_lp1 = torch.tensor(mb1["log_probs"],  dtype=torch.float32).to(dev1)
                 adv1    = (adv1 - adv1.mean()) / (adv1.std() + 1e-8)
 
+                # ═══ FIX: Apply stored action mask during PPO update ═══
+                # Without this, new_logprob is computed from UNMASKED distribution
+                # while old_logprob used MASKED distribution → corrupted ratios.
+                stored_masks = mb1["masks"]
+                if stored_masks[0] is not None:
+                    maint_mask_t = torch.tensor(
+                        np.stack(stored_masks), dtype=torch.bool).to(dev1)
+                else:
+                    maint_mask_t = None
                 maint_dist, reorder_dist = agent1.policy.forward(
-                    obs1_t, maint_mask=None, reorder_mask=None)
+                    obs1_t, maint_mask=maint_mask_t, reorder_mask=None)
                 maint_acts = torch.tensor(
                     np.array([a["maintenance"] for a in mb1["actions"]]),
                     dtype=torch.long).to(dev1)

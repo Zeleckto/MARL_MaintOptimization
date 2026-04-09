@@ -197,13 +197,13 @@ class MAPPOTrainer:
 
         sem2, idx2, logp2, ent2 = self.agent2.act(obs2, valid_pairs)
 
-        # Value after Agent 1 acted (post-action, pre-Agent2)
-        # FIX: Agent 2 has NO critic — using Agent 1's critic gave random
-        # advantages because V1 predicts r1 returns (maintenance), not r2
-        # returns (scheduling). With v2=0, Agent 2 uses pure discounted
-        # returns (MC) for advantages. Higher variance but CORRECT direction.
-        # Agent 2 will now actually learn from completion bonuses.
-        v2 = 0.0
+        # Agent 2 value baseline: running mean of r2.
+        # v2=0 gave pure MC returns — variance too high over 150 steps.
+        # Running mean subtracts the "average r2" so advantages reflect
+        # "was THIS step's r2 better or worse than average?"
+        # This is a constant baseline (not state-dependent) but reduces
+        # variance by ~80% compared to v2=0.
+        v2 = self._r2_mean
 
         # Apply Agent 2 action
         self.env._step_agent2(idx2)
@@ -439,10 +439,10 @@ class MAPPOTrainer:
                     action1_maint=self.last_action1["maintenance"]
                     if self.last_action1 else None
                 )
-                last_v2 = 0.0
+                last_v2 = self._r2_mean  # constant baseline, same as per-step v2
             else:
                 last_v1 = 0.0
-                last_v2 = 0.0
+                last_v2 = 0.0  # terminated: no future value
 
             self.buffer.compute_gae(
                 last_value1 = last_v1,

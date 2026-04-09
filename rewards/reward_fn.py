@@ -133,6 +133,7 @@ class RewardFunction:
         shared_reward:    float,
         current_step:     int,
         t_max:            int = 150,
+        n_valid_pairs:    int = 0,
     ) -> float:
         """Calls compute_scheduling_reward with only the params it accepts.
         Handles both current_step (zip) and current_time (v1) naming.
@@ -153,6 +154,8 @@ class RewardFunction:
             kwargs["current_step"] = current_step
         elif "current_time" in self._sched_params:
             kwargs["current_time"] = current_step
+        if "n_valid_pairs" in self._sched_params:
+            kwargs["n_valid_pairs"] = n_valid_pairs
         return compute_scheduling_reward(**kwargs)
 
 
@@ -174,6 +177,7 @@ class RewardFunction:
         units_ordered:            float = 0.0,
         inv_below_rop:            bool  = False,
         pre_maint_health:         list = None,
+        n_valid_pairs:            int = 0,
     ) -> Tuple[float, float, float]:
         """Computes r1, r2, R_shared for one timestep."""
 
@@ -199,6 +203,7 @@ class RewardFunction:
             jobs, completed_job_ids, assignment,
             machine_states, r_shared, current_step,
             t_max=self.t_max,
+            n_valid_pairs=n_valid_pairs,
         )
 
         return r1, r2, r_shared

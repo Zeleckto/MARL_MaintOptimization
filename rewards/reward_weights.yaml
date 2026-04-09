@@ -1,12 +1,10 @@
-# rewards/reward_weights.yaml — FINAL
-# =====================================
-# PM gated by h<75 hard mask in env. No pm_bonus needed.
-# ΔRUL at 0.03 provides deferred credit at PM completion.
-# Agent learns WHEN within 0-75% to PM — the real decision.
+# rewards/reward_weights.yaml — v5
+# PM gated by h<75 hard mask. No pm_bonus. No ΔRUL.
+# Agent 2 gets DENSE assignment bonus + wait penalty.
 
 # Shared signal
-c_fail: 25.0
-lambda_shared: 0.4
+c_fail: 50
+lambda_shared: 0.5
 w_comp_shared: 1.0
 
 # Agent 1 costs
@@ -16,11 +14,13 @@ delta_obj: 0.05
 w_hold: 0.005
 
 # Agent 1 PM signal
-w_pm_bonus: 0.0                # hard mask at h<75 prevents spam; bonus not needed
-w_RUL: 0.03                   # deferred credit: 0.03 × 26 = +0.78 at PM completion
+w_pm_bonus: 0.0
+w_RUL: 0.0
 
 # Agent 2 scheduling
 alpha: 1.0
-w_tard: 5.0
-w_comp: 3.0
-w_health: 0.5
+w_tard: 8.0                   # incremental tardiness
+w_comp: 5.0                   # per job completed
+w_health: 0.5                 # health-aware dispatch
+w_assign: 0.5                 # NEW: +0.5 per assignment made (dense every-step signal)
+w_wait: 0.3                   # NEW: -0.3 for waiting when valid pairs exist

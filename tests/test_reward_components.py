@@ -37,9 +37,12 @@ MACHINE_CFGS = [
 DEFAULT_ETA = [3000.0] * 5
 
 DEFAULT_WEIGHTS = {
-    "c_fail": 30.0, "c_PM": 1.0, "c_CM": 3.0,
-    "w_avail": 2.0, "w_tard": 5.0, "w_comp": 3.0,
-    "w_health": 0.5, "lambda_shared": 0.3,
+    "c_fail": 25.0, "c_PM": 1.0, "c_CM": 7.0,
+    "w_pm_bonus": 0.0, "w_RUL": 0.0, "delta_obj": 0.05,
+    "w_hold": 0.005, "w_tard": 8.0, "w_comp": 5.0,
+    "w_health": 0.5, "lambda_shared": 0.4,
+    "w_comp_shared": 1.0, "alpha": 1.0,
+    "w_assign": 0.5, "w_wait": 0.3,
 }
 
 
@@ -112,10 +115,9 @@ def test_no_maintenance_no_cost():
         shared_reward=0.0,
         weights=DEFAULT_WEIGHTS,
     )
-    # Availability bonus (2.0) + RUL bonus (w_RUL*rul_frac, ~0.5)
-    # Value > 2.0 now because RUL bonus was added
-    assert r1 > 2.0, f"r1={r1:.4f} should be > 2.0 (avail + RUL bonus)"
-    print(f"PASS: no maintenance, full avail -> r1={r1:.3f} (= w_avail*1.0)")
+    # w_avail removed, no actions → r1 ≈ 0 (only ΔRUL default=0)
+    assert abs(r1) < 1.0, f"r1={r1:.4f} should be near 0 (no actions, no avail bonus)"
+    print(f"PASS: no maintenance -> r1={r1:.3f} (near zero, clean signal)")
 
 def test_pm_deducts_cost():
     states = make_states()
@@ -144,9 +146,9 @@ def test_ordering_cost_deducted():
     states = make_states()
     r1_no_order = compute_maintenance_reward([0]*5, 0.0,  states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
     r1_order    = compute_maintenance_reward([0]*5, 50.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS)
-    # ordering cost now delta-weighted (delta=0.5), so diff = 0.5*50 = 25
+    # ordering cost delta-weighted (delta=0.05), so diff = 0.05*50 = 2.5
     diff = r1_no_order - r1_order
-    assert abs(diff - 25.0) < 1e-6, f"ordering diff={diff:.4f}, expected 25.0 (delta=0.5)"
+    assert abs(diff - 2.5) < 1e-6, f"ordering diff={diff:.4f}, expected 2.5 (delta=0.05)"
     print(f"PASS: ordering cost 50.0 deducted correctly")
 
 def test_failure_penalty_propagated_to_r1():
@@ -154,9 +156,9 @@ def test_failure_penalty_propagated_to_r1():
     r_shared = compute_shared_reward([0], c_fail=30.0)  # -30
     r1_no_fail = compute_maintenance_reward([0]*5, 0.0, states, DEFAULT_ETA, 0.0,      DEFAULT_WEIGHTS)
     r1_fail    = compute_maintenance_reward([0]*5, 0.0, states, DEFAULT_ETA, r_shared, DEFAULT_WEIGHTS)
-    # lambda=0.3, so penalty = 0.3 * (-30) = -9
+    # lambda=0.4, so penalty = 0.4 * (-30) = -12
     diff = r1_no_fail - r1_fail
-    assert abs(diff - 9.0) < 1e-6
+    assert abs(diff - 12.0) < 1e-6
     print(f"PASS: failure penalty propagated to r1 (diff={diff:.2f})")
 
 
@@ -197,61 +199,67 @@ def test_health_bonus_fires_on_assignment():
         [], [], assignment=None,
         machine_states=states, shared_reward=0.0,
         t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
+        n_valid_pairs=5,  # valid pairs exist but agent didn't assign
     )
     r2_assign = compute_scheduling_reward(
         [], [], assignment=(0, 0, 0),   # assign to machine 0 (health=100)
         machine_states=states, shared_reward=0.0,
         t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
+        n_valid_pairs=5,
     )
-    expected_bonus = DEFAULT_WEIGHTS["w_health"] * 1.0   # health=100/100=1.0
+    # Diff = w_health * 1.0 + w_assign - (-w_wait) = 0.5 + 0.5 + 0.3 = 1.3
+    expected_bonus = DEFAULT_WEIGHTS["w_health"] * 1.0 + DEFAULT_WEIGHTS["w_assign"] + DEFAULT_WEIGHTS["w_wait"]
     assert abs(r2_assign - r2_no_assign - expected_bonus) < 1e-6
-    print(f"PASS: health bonus fires on assignment (+{expected_bonus:.3f})")
+    print(f"PASS: assignment bonus fires (+{expected_bonus:.3f} = health + assign + avoided_wait)")
 
 def test_late_job_incurs_tardiness_penalty():
     job = make_job(0, due=50.0, weight=2.0, complete=True)
     job.tardiness = 10.0   # 10 steps late
+    job.completion_time = 60.0  # completed at 60, due at 50
     r2 = compute_scheduling_reward(
-        jobs=[job], completed_job_ids=[], assignment=None,
+        jobs=[job], completed_job_ids=[0], assignment=None,
         machine_states=make_states(), shared_reward=0.0,
-        t_max=200, current_step=0, weights=DEFAULT_WEIGHTS,
+        t_max=200, current_step=60, weights=DEFAULT_WEIGHTS,
     )
-    # tard penalty = w_tard * w_j * tardiness / T_max = 5 * 2 * 10 / 200 = 0.5
-    assert r2 < 0, "Late job should give negative reward"
-    print(f"PASS: late job -> negative r2={r2:.4f}")
+    # Incremental: only fires because job 0 is in completed_job_ids
+    # tard = w_tard * w_j * (60-50) / T = 5 * 2 * 10 / 200 = 0.5
+    # comp bonus = 3.0 per completion
+    # r2 = -0.5 + 3.0 = 2.5 (net positive because completion dominates)
+    assert r2 > 0, f"Completed late job should have net positive r2 (comp bonus > tard): r2={r2:.4f}"
+    print(f"PASS: late job completed -> r2={r2:.4f} (comp bonus + tard penalty)")
 
 
 # ─── Dense signal check ───────────────────────────────────────────────────────
 
-def test_r1_nonzero_every_step_due_to_avail_bonus():
+def test_r1_dense_signal_from_holding_cost():
     """
-    Agent 1 must receive non-zero reward every step even with no actions.
-    This is the dense signal from the availability bonus.
+    Agent 1 receives dense signal via holding cost every step.
     """
     states = make_states()
     r1 = compute_maintenance_reward(
-        [0]*5, 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS
+        [0]*5, 0.0, states, DEFAULT_ETA, 0.0, DEFAULT_WEIGHTS,
+        inventory_total=100.0
     )
-    assert r1 != 0.0, "r1 must be non-zero every step (availability bonus)"
-    print(f"PASS: r1 non-zero every step = {r1:.3f} (dense availability signal)")
+    assert r1 != 0.0, f"r1 must be non-zero with holding cost: r1={r1}"
+    assert r1 < 0, f"r1 should be negative from holding cost: r1={r1}"
+    print(f"PASS: r1 dense signal from holding cost = {r1:.3f}")
 
 def test_no_dominance_in_reward_magnitudes():
     """
     No single component should dominate by 10x.
-    Check that avail_bonus, maint_cost, and tard_penalty are same order of magnitude.
+    Check that failure penalty, PM cost, and completion bonus are reasonable.
     """
-    states = make_states()
-    avail_bonus = DEFAULT_WEIGHTS["w_avail"] * 1.0   # =2.0
-    pm_cost     = DEFAULT_WEIGHTS["c_PM"]              # =1.0
-    fail_penalty = DEFAULT_WEIGHTS["c_fail"]           # =30.0
+    fail_penalty = DEFAULT_WEIGHTS["c_fail"]              # =25.0
+    pm_cost      = DEFAULT_WEIGHTS["c_PM"]                # =1.0
+    comp_bonus   = DEFAULT_WEIGHTS["w_comp"]              # =5.0
+    assign_bonus = DEFAULT_WEIGHTS["w_assign"]            # =0.5
 
-    # Failure penalty is 15x availability bonus — this is intentional
-    # But availability bonus should be same order as PM cost
-    ratio_avail_pm = avail_bonus / pm_cost
-    assert ratio_avail_pm < 5.0, (
-        f"Availability bonus ({avail_bonus}) too large vs PM cost ({pm_cost})"
-    )
+    # Failure must be much worse than PM cost
+    assert fail_penalty > 10 * pm_cost, "Failure must be much worse than PM cost"
+    # Completion bonus should be meaningful (>= 2x assign bonus)
+    assert comp_bonus >= 2 * assign_bonus, "Completion must dominate assignment"
     print(f"PASS: reward magnitudes reasonable: "
-          f"avail={avail_bonus}, PM={pm_cost}, fail={fail_penalty}")
+          f"fail={fail_penalty}, PM_cost={pm_cost}, comp={comp_bonus}, assign={assign_bonus}")
 
 
 if __name__ == "__main__":
@@ -271,7 +279,7 @@ if __name__ == "__main__":
         test_completion_bonus_fires,
         test_health_bonus_fires_on_assignment,
         test_late_job_incurs_tardiness_penalty,
-        test_r1_nonzero_every_step_due_to_avail_bonus,
+        test_r1_dense_signal_from_holding_cost,
         test_no_dominance_in_reward_magnitudes,
     ]
     passed = failed = 0

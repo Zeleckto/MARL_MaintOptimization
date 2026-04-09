@@ -607,6 +607,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             n_auto_cm                = getattr(self, "_auto_cm_count", 0),
             units_ordered            = _units_ordered,
             inv_below_rop            = _inv_below_rop,
+            n_valid_pairs            = len(self._valid_pairs),
         )
         self.rewards[AGENT_PDM]     = r1
         self.rewards[AGENT_JOBSHOP] = r2

@@ -72,12 +72,28 @@ def main():
             actor2       = trainer.agent2.tgin,
             critic       = trainer.critic,
             optim_actor1 = trainer.optim1,
-            optim_actor2 = trainer.optim2,
+            optim_actor2 = None,           # Skip: ActionScorer architecture changed
             optim_critic = trainer.optim_critic,
             device       = trainer.device,
+            action_scorer = trainer.agent2.action_scorer,
         )
         trainer.global_step = meta["global_step"]
         trainer.episode     = meta["episode"]
+
+        # ── Freeze linear head: protect fewest-ops-left initialization ──
+        # Linear head starts with expert weights (25+ jobs from step 0).
+        # Without freezing, RL gradients destroy it within 200 episodes.
+        # MLP head (random→0 init) learns corrections; linear provides base.
+        for param in trainer.agent2.action_scorer.linear_head.parameters():
+            param.requires_grad = False
+        print("  ActionScorer linear_head FROZEN (expert init protected)")
+
+        # ── Rebuild Agent 2 optimizer with only trainable params ──
+        import torch.optim as optim
+        lr2 = 3e-5  # 10x lower than default — MLP learns corrections slowly
+        trainable = [p for p in trainer.agent2.parameters() if p.requires_grad]
+        trainer.optim2 = optim.Adam(trainable, lr=lr2)
+        print(f"  Agent 2 optimizer rebuilt: {len(trainable)} param groups, lr={lr2}")
 
     trainer.train(total_timesteps=args.timesteps)
 

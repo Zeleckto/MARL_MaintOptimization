@@ -788,6 +788,11 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             "edge_op_job":        e_oj,
             "edge_attr_op_job":   a_oj,
             "valid_pairs":        self._valid_pairs,
+            # Raw data for ActionScorer hand-crafted features
+            "_jobs":              self.jobs,
+            "_machine_states":    self.machine_states,
+            "_current_step":      self.current_step,
+            "_t_max":             self.t_max,
         }
 
 

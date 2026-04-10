@@ -151,7 +151,7 @@ reward:
 # --- MAPPO hyperparameters ---------------------------------------------------
 mappo:
   lr_actor1:       0.0001
-  lr_actor2:       0.0003
+  lr_actor2: 0.00003    # was 0.0003 — 10x lower so MLP learns slowly
   lr_critic:       0.001
   gamma:           0.99
   gae_lambda:      0.95
@@ -223,5 +223,5 @@ logging:
   log_dir:                "outputs/logs/"        # training_log.txt
 
   checkpoint_every_steps:   25000 # overwrite outputs/checkpoints/latest.pt
-  milestone_every_steps:    50000  # ALSO save phaseN_step_050k.pt every 50k
-  log_every_n_episodes:     10
+  milestone_every_steps:    25000  # ALSO save phaseN_step_050k.pt every 50k
+  log_every_n_episodes:     5

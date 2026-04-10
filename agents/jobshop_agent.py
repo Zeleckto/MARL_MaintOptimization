@@ -65,7 +65,7 @@ class JobShopAgent:
             if key not in op_id_map:
                 op_id_map[key] = min(i, n_op_nodes - 1)
 
-        dist, logits = self.action_scorer(embeddings, valid_pairs, op_id_map)
+        dist, logits = self.action_scorer(embeddings, valid_pairs, op_id_map, obs=obs)
         return dist, valid_pairs, op_id_map
 
 

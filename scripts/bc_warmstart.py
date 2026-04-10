@@ -123,7 +123,11 @@ def collect_expert_data(config, expert_fn, n_episodes=50, seeds=None):
 
 def train_bc(agent2, dataset, n_epochs=20, batch_size=64, lr=1e-3, device="cpu"):
     """Train Agent 2 via cross-entropy on expert demonstrations."""
-    optimizer = torch.optim.Adam(agent2.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(
+    list(agent2.action_scorer.fast_mlp.parameters()) + 
+    [agent2.action_scorer.gate],
+    lr=lr
+)
 
     # Shuffle dataset
     rng = np.random.default_rng(42)

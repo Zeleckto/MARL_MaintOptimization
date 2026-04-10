@@ -21,13 +21,14 @@ def save_checkpoint(
     episode:        int,
     global_step:    int,
     actor1,         # nn.Module
-    actor2,         # nn.Module
+    actor2,         # nn.Module (TGIN)
     critic,         # nn.Module
     optim_actor1,
     optim_actor2,
     optim_critic,
     config:         dict,
     tag:            str = "latest",
+    action_scorer=None,  # nn.Module (ActionScorer — was missing before)
 ) -> str:
     """
     Saves full training state to checkpoint_dir/tag.pt
@@ -62,6 +63,8 @@ def save_checkpoint(
         "optim_actor2":     optim_actor2.state_dict(),
         "optim_critic":     optim_critic.state_dict(),
         "config":           config,
+        # FIX: Also save action_scorer (was missing → reset on every resume)
+        "action_scorer_state": action_scorer.state_dict() if action_scorer else None,
     }, path)
 
     print(f"Checkpoint saved: {path} (episode={episode}, step={global_step})")
@@ -77,6 +80,7 @@ def load_checkpoint(
     optim_actor2 = None,
     optim_critic  = None,
     device:      str = "cuda",
+    action_scorer = None,
 ) -> dict:
     """
     Loads checkpoint from path into provided model instances.
@@ -105,6 +109,13 @@ def load_checkpoint(
         optim_actor2.load_state_dict(ckpt["optim_actor2"])
     if optim_critic is not None:
         optim_critic.load_state_dict(ckpt["optim_critic"])
+
+    # FIX: Load action_scorer if saved (older checkpoints won't have this)
+    if action_scorer is not None and "action_scorer_state" in ckpt and ckpt["action_scorer_state"] is not None:
+        action_scorer.load_state_dict(ckpt["action_scorer_state"])
+        print("  ActionScorer weights loaded ✓")
+    elif action_scorer is not None:
+        print("  WARNING: No action_scorer_state in checkpoint — using random init")
 
     print(f"Checkpoint loaded: {path}")
     print(f"  Resuming from episode={ckpt['episode']}, step={ckpt['global_step']}")

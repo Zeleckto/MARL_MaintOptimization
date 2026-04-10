@@ -32,7 +32,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 class MARLProxyBaseline:
-    name = "MARL_proxy(h<75)"
+    name = "MARL_proxy_h75"
     def reset(self): pass
     def agent1_action(self, env):
         maint = np.zeros(len(env.machine_states), dtype=int)
@@ -174,6 +174,8 @@ def main():
     outdir=args.outdir; os.makedirs(os.path.join(outdir,"per_baseline"),exist_ok=True)
     baselines=get_all_baselines(); baselines.append(MARLProxyBaseline())
     seeds=list(range(42,42+args.episodes)); env=ManufacturingEnv(config)
+    # Baselines use their own PM logic — bypass the h<75 training gate
+    env.bypass_health_gate = True
     print(f"\n{'='*70}\n  BASELINE BENCHMARK — {args.episodes} episodes x {len(baselines)} baselines\n{'='*70}\n")
     R={}
     for pol in baselines:

@@ -192,6 +192,9 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         self._cm_queue: set      = set()   # machines awaiting auto-CM
         self._auto_cm_count      = 0
         self._episode_order_cost = 0.0
+        # Health gate: when False (default), PM blocked above 75% health.
+        # Set True for baseline evaluation so baselines can use their own PM logic.
+        self.bypass_health_gate = False
 
 
     # =========================================================================
@@ -337,7 +340,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
                 # This caps PM at ~12/episode even with aggressive policy,
                 # consuming only 3% of capacity (vs 31% without gate).
                 # Agent learns WHEN within 0-75% to PM — the real decision.
-                if not self.machine_busy[m_idx] and self.machine_states[m_idx].health < 75:
+                if not self.machine_busy[m_idx] and (self.bypass_health_gate or self.machine_states[m_idx].health < 75):
                     ren = self.rho_PM[m_idx, :self.n_renewable].astype(int)
                     con = self.rho_PM[m_idx, self.n_renewable:]
                     if self.resource_state.can_do_maintenance(ren, con):
@@ -432,6 +435,8 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
         )
         self._completed_job_ids = completed_ids
         self._episode_completions += len(completed_ids)
+        # Track operation completions (each freed machine = one op finished)
+        self._n_ops_completed_this_step = len(freed_machines)
 
         # Free machines whose operations completed
         for m in freed_machines:
@@ -608,6 +613,7 @@ class ManufacturingEnv(AECEnv if PETTINGZOO_AVAILABLE else object):
             units_ordered            = _units_ordered,
             inv_below_rop            = _inv_below_rop,
             n_valid_pairs            = len(self._valid_pairs),
+            n_ops_completed          = getattr(self, '_n_ops_completed_this_step', 0),
         )
         self.rewards[AGENT_PDM]     = r1
         self.rewards[AGENT_JOBSHOP] = r2

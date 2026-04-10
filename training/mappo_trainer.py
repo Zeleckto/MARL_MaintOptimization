@@ -491,6 +491,7 @@ class MAPPOTrainer:
                     optim_critic   = self.optim_critic,
                     config         = self.config,
                     tag            = "latest",
+                    action_scorer  = self.agent2.action_scorer,
                 )
 
                 # Save milestone checkpoint (permanent snapshot every N steps)
@@ -511,6 +512,7 @@ class MAPPOTrainer:
                         optim_critic   = self.optim_critic,
                         config         = self.config,
                         tag            = tag,
+                        action_scorer  = self.agent2.action_scorer,
                     )
 
         print(f"\nTraining complete. Total steps: {self.global_step:,}")

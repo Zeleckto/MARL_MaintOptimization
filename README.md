@@ -1,445 +1,517 @@
-<div align="center">
+<h1 align="center">Multi-Agent Reinforcement Learning for Joint<br>Predictive Maintenance & Flexible Job Shop Scheduling</h1>
 
-# Three-Tier Manufacturing Optimization Framework
+<p align="center">
+  <b>BTP2 (MCD412) — Indian Institute of Technology Delhi</b><br>
+  Shreenath Jha &amp; Kirtan Gehlot &nbsp;|&nbsp; Supervisor: Dr. Minakshi Kumari<br>
+  <i>Department of Mechanical Engineering — April 2026</i>
+</p>
 
-### Integrated Predictive Maintenance · Job Shop Scheduling · Resource Allocation
-### using Multi-Agent Reinforcement Learning
-
-**MCD412: BTP2 — IIT Delhi, Department of Mechanical Engineering**
-
-Shreenath Jha (2022ME11306) · Kirtan Gehlot (2022ME12030)
-
-*Supervisor: Dr. Minakshi Kumari*
-
----
-
-![Python](https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.6-red?style=flat-square&logo=pytorch)
-![PyG](https://img.shields.io/badge/PyG-HeteroConv-orange?style=flat-square)
-![PettingZoo](https://img.shields.io/badge/PettingZoo-AEC-green?style=flat-square)
-![Tests](https://img.shields.io/badge/Unit_Tests-91_passing-brightgreen?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Active_Development-yellow?style=flat-square)
-
-</div>
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python" />
+  <img src="https://img.shields.io/badge/PyTorch-2.2+-ee4c2c?logo=pytorch" />
+  <img src="https://img.shields.io/badge/PettingZoo-AEC-green" />
+  <img src="https://img.shields.io/badge/Tests-83_passing-brightgreen" />
+</p>
 
 ---
 
 ## Overview
 
-Modern manufacturing systems face a critical challenge: **predictive maintenance**, **job shop scheduling**, and **resource allocation** are traditionally solved as separate problems. Independent decisions lead to machines going down mid-operation, maintenance competing with production for the same resources, and schedules that ignore machine health entirely.
+This project addresses the **joint optimisation of Predictive Maintenance (PDM) and Flexible Job Shop Scheduling (FJSP)** — an open problem identified by [Cassady & Kutanoglu (2005)](https://doi.org/10.1109/TR.2005.847270) where independent optimisation of maintenance and scheduling leaves 15–30% of total cost savings on the table.
 
-This project develops a **Three-Tier Cascade Framework** that solves all three simultaneously:
+We implement a cooperative **Multi-Agent Proximal Policy Optimisation (MAPPO)** system with two specialised agents that learn to coordinate maintenance timing with production scheduling in a stochastic manufacturing environment featuring Weibull degradation, Kijima Type I imperfect repair, and shared resources.
 
-- **Tier 1 — Exact Optimization:** Google OR-Tools CP-SAT solver with 38 constraints across 5 constraint groups, yielding provably optimal solutions for small instances (M≤5, J≤10). Used to generate ground-truth benchmarks.
-- **Tier 2 — Offline Learning:** Imitation learning from Tier 1 solutions (planned).
-- **Tier 3 — Online MARL:** Two-agent MAPPO with centralized training and decentralized execution (CTDE), designed for real-time adaptive decision-making under uncertainty.
+### Key Results
 
-The framework extends prior work (BTP1/MCD411) which demonstrated that physics-informed MAPPO can learn effective maintenance policies on a die-casting machine, achieving **8× improvement in MTBF** over reactive maintenance.
+| Metric | MARL (Ours) | Reactive+FCFS | Fixed-PM+SPT | ABR+MDD |
+|--------|:-----------:|:-------------:|:------------:|:-------:|
+| **Jobs completed** | 24.3 | 25.6 | **26.6** | 23.2 |
+| **Failures/episode** | **2.7** | 5.1 | **2.7** | 3.6 |
+| **Fleet health** | **81.0%** | 60.8% | 77.3% | 75.2% |
+| **On-time delivery** | **12.7** | 11.6 | 11.1 | 11.5 |
+| **Tardiness** | 989 | 1285 | 1511 | **838** |
+| **MTBF (shifts)** | **64** | 31 | 37 | 32 |
 
----
+**MARL wins 5 of 7 primary metrics** and Pareto-dominates ABR+MDD on all five Pareto metrics. It achieves **47% fewer failures** than reactive maintenance while maintaining 95% of best-baseline throughput.
 
-## Key Research Contributions
-
-### 1. Physics-Informed Environment
-The Tier 3 environment models realistic manufacturing degradation:
-- **Weibull reliability model** — machine failures sampled via conditional Weibull probability P(fail|survived to t), with machine-specific β and η parameters
-- **Kijima Type I imperfect repair** — virtual age update V_n = V_{n-1} + q·X_n, capturing cumulative degradation across repair cycles
-- **Effective age tracking** — hazard rate computed from effective_age = virtual_age + time_since_maint (critical correctness fix: using virtual_age alone gives stale hazard rates between repairs)
-- **Three stochasticity phases** — Phase 1: Weibull failures only; Phase 2: +LogNormal processing times, Beta repair effectiveness; Phase 3: +Poisson job arrivals, LogNormal lead times
-
-### 2. Two-Agent MARL Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│              CENTRALIZED CRITIC V_φ(s_global)           │
-│    Concat[pool(ops), pool(machines), pool(jobs),        │
-│           resource_state, pending_orders_pipeline]       │
-└───────────────────────┬─────────────────────────────────┘
-                        │ shared value signal
-          ┌─────────────┴──────────────┐
-          ▼                            ▼
-┌─────────────────┐          ┌─────────────────────────┐
-│  AGENT 1 (PDM)  │          │  AGENT 2 (Job Shop)     │
-│  MLP policy     │          │  TGIN policy             │
-│  θ₁, lr=1e-4   │          │  θ₂, lr=3e-4            │
-│                 │          │                          │
-│  Actions:       │ masks     │  Actions:               │
-│  • PM/CM/None  ├──────────▶│  • (job, op, machine)   │
-│  • Reorder qty  │ σ_m state │  • WAIT                 │
-└─────────────────┘          └─────────────────────────┘
-```
-
-**AEC ordering (PettingZoo):** Agent 1 acts first, updating machine statuses σ_m. Agent 2 then receives the post-Agent-1 graph observation — this is a deliberate Markov property fix. Concurrent action (ParallelEnv) would violate Markov since Agent 2's valid actions depend on Agent 1's maintenance decisions this timestep.
-
-**Action masking:** Agent 1 masks PM on busy/failed machines and masks reorder when pipeline already covers projected consumption (prevents over-ordering reward hacking). Agent 2's mask is derived from the post-Agent-1 machine state — ensuring no operation is assigned to a machine just sent to maintenance.
-
-### 3. Tripartite Graph Isomorphism Network (TGIN)
-
-Agent 2 represents the scheduling state as a heterogeneous tripartite graph:
-
-```
-Operations (10-dim) ──→ Machines (15-dim) ──→ Jobs (7-dim)
-     ↑                       ↑                    │
-     └───────────────────────┴────────────────────┘
-              L=3 rounds bidirectional message passing
-```
-
-Inspired by Zhang et al. (2025) train marshalling GNN-DRL approach. Key adaptations:
-- Machine nodes carry Weibull health features (h_m, λ_m, RUL_m, φ_m) enabling **health-aware load balancing** — the scheduler learns to prefer healthier machines, reducing mid-operation failure probability
-- Dynamic graph size: number of operation and job nodes changes each step (Poisson arrivals in Phase 3) — GNN handles this naturally via permutation invariance
-- **GIN over GAT/GraphSAGE:** GIN's sum aggregation is maximally expressive among message-passing GNNs, critical for distinguishing scheduling states that differ only in due-date urgency
-
-Action scoring:
-```
-score(o,m) = MLP_score(concat[h_o^L, h_m^L])
-π₂(o,m|s) = softmax(masked_scores)   # WAIT always appended
-```
-
-### 4. Markov Property Fix — Pending Orders Pipeline
-
-Constraint C32 in the formulation: `I_{r,t+1} = I_{r,t} − consumed + Q_{r, t−L_r}`
-
-The replenishment term depends on an order placed L_r steps ago. Without tracking the full pipeline, the inventory state is **not Markov-sufficient** — an agent seeing only current inventory cannot predict when replenishment arrives. 
-
-Fix: `pending_orders[r, lag]` vector of shape `[n_consumable, max_lead_time]` added to Agent 1's observation. Shifts left each timestep. Order injected at `lag = lead_time − 1`, arrives when it reaches `lag = 0`.
-
-### 5. Decomposed Reward Structure
-
-Rather than a single joint objective (vulnerable to credit assignment failure):
-
-```
-R_shared = −c_fail × n_failures_this_step          # joint responsibility
-
-r1 = −c_PM·PM_actions − c_CM·CM_actions            # maintenance costs
-   − c_r·ordering_cost                              # resource ordering
-   + w_avail · A_system(s_{t+1})                   # DENSE availability bonus
-   + λ · R_shared
-
-r2 = −w_tard · Σ wⱼ·max(0, Cⱼ−dⱼ) / T_max       # normalised tardiness
-   + w_comp · |jobs completed this step|             # DENSE completion bonus
-   + w_health · mean(hm) over assigned machines     # health-aware dispatch
-   + λ · R_shared
-```
-
-The dense signals (`w_avail`, `w_comp`, `w_health`) are critical — without them ~90% of timesteps return zero reward, GAE advantages collapse to noise, and learning stalls.
+> All results evaluated across 3 independent seed sets (90 total episodes) with Bonferroni-corrected statistical testing.
 
 ---
 
-## Project Architecture
+## Architecture
 
 ```
-manufacturing_marl/
-│
-├── configs/                          # Phase configs + benchmark instances
-│   ├── base.yaml                     # M=5 machines, R=6 resources, MAPPO hyperparams
-│   ├── phase1/2/3.yaml               # Stochasticity levels
-│   └── benchmark_instances/          # small_3m_5j, medium_5m_10j, large_5m_20j
-│
-├── environments/
-│   ├── mfg_env.py                    # PettingZoo AEC environment shell
-│   └── transitions/
-│       ├── degradation.py            # Weibull + Kijima physics (ONLY file with β,η)
-│       ├── job_dynamics.py           # Job/op lifecycle, PENDING→READY→IN_PROGRESS→DONE
-│       ├── resource_dynamics.py      # Inventory + pending_orders pipeline (Markov fix)
-│       └── failure_handler.py        # Shock absorber: preemption on failure
-│
-├── models/
-│   ├── tgin/
-│   │   ├── tgin.py                   # L=3 rounds bidirectional HeteroConv
-│   │   ├── graph_builder.py          # State → PyG HeteroData (rebuilt every step)
-│   │   └── action_scorer.py          # MLP_score + masked softmax + WAIT action
-│   ├── mlp_policy.py                 # Agent 1 actor (MLP, two heads: maint + reorder)
-│   └── critic.py                     # Centralized critic (concat per-type pooling)
-│
-├── agents/
-│   ├── pdm_agent.py                  # Agent 1 wrapper: obs→mask→policy→action
-│   └── jobshop_agent.py              # Agent 2 wrapper: obs→graph→TGIN→score→action
-│
-├── training/
-│   ├── mappo_trainer.py              # Main training loop (AEC direct method calls)
-│   ├── rollout_buffer.py             # GAE with truncation/termination distinction
-│   ├── ppo_update.py                 # PPO losses, separate optimizers per agent
-│   └── parallel_envs.py             # 4 CPU processes → batched GPU forward pass
-│
-├── rewards/
-│   ├── reward_fn.py                  # Orchestrator
-│   └── components/
-│       ├── shared_reward.py          # Failure penalty (both agents)
-│       ├── maintenance_reward.py     # r1: maintenance costs + availability bonus
-│       └── scheduling_reward.py      # r2: tardiness + completion + health bonus
-│
-├── tier1/
-│   ├── cp_sat_solver.py              # OR-Tools CP-SAT (placeholder — in progress)
-│   └── formulation/                  # 38 constraints across 5 groups (A–E)
-│
-├── benchmarks/
-│   ├── metrics.py                    # Makespan, weighted tardiness, MTBF, availability
-│   └── evaluate.py                   # Policy evaluation vs baselines
-│
-├── tests/                            # 91 unit tests — all passing
-│   ├── test_degradation.py           # Weibull physics, bathtub curve, seeding
-│   ├── test_kijima.py                # Imperfect repair model correctness
-│   ├── test_inventory.py             # Pending orders pipeline, Markov fix
-│   ├── test_action_masking.py        # Both agents' masking correctness
-│   ├── test_reward_components.py     # Dense signal, decomposition
-│   ├── test_gae.py                   # GAE, bootstrap distinction
-│   └── test_graph_builder.py         # TGIN graph structure validation
-│
-├── run_all_tests.py                  # Run all 91 unit tests
-├── run_integration_tests.py          # 15 end-to-end integration tests
-├── viz_factory.py                    # Atari-style factory floor visualiser (pygame)
-├── Dockerfile
-└── docker-compose.yml
+┌──────────────────────────────────────────────────────────────────┐
+│              Manufacturing Environment (PettingZoo AEC)          │
+│  5 machines (Weibull degradation)  ·  40 jobs  ·  150 shifts     │
+│  Kijima Type I repair (q=0.5)  ·  3 consumable + 3 renewable    │
+└──────────┬──────────────────────────────┬────────────────────────┘
+           │                              │
+ ┌─────────▼──────────┐       ┌──────────▼───────────────────┐
+ │  Agent 1 (PDM)     │       │  Agent 2 (Scheduling)        │
+ │  MLP Policy        │       │  TGIN + Hybrid ActionScorer  │
+ │                    │       │                              │
+ │  Obs: health, RUL, │       │  Obs: heterogeneous graph    │
+ │       inventory    │       │       + raw env state        │
+ │                    │       │                              │
+ │  Action: binary PM │       │  Action: select (j, op, m)   │
+ │    per machine +   │       │    from valid pairs or WAIT  │
+ │    reorder qty     │       │                              │
+ │                    │       │  Scoring:                    │
+ │  Constraint:       │       │    Linear (frozen, expert)   │
+ │    h < 75% gate    │       │    + MLP residual (learned)  │
+ └─────────┬──────────┘       └──────────┬───────────────────┘
+           │         Shared Reward        │
+           │    R = -40·fail + 1·comp     │
+           │         (λ = 0.5 each)       │
+           └──────────┬──────────────────┘
+                ┌─────▼──────┐
+                │   Critic   │
+                │ Centralised│
+                │ (trained   │
+                │  on r₁)    │
+                └────────────┘
 ```
+
+### Agent 1: Predictive Maintenance
+
+- **Architecture:** MLP (85 → 256 → 256 → heads)
+- **Observation:** Machine health, virtual age, RUL estimates, resource inventory, job summary statistics
+- **Action:** Binary PM decision per machine (masked by h < 75% gate) + continuous reorder quantities
+- **Key result:** Learned PM timing reduces failures from 5.1 → 2.7 (47% reduction)
+
+### Agent 2: Job Shop Scheduling
+
+- **Architecture:** TGIN graph encoder + Hybrid ActionScorer
+- **TGIN:** 3-layer Graph Isomorphism Network processing heterogeneous manufacturing graph (operation/machine/job nodes)
+- **ActionScorer (v4 — final):** Two-head scorer on 7 hand-crafted features:
+
+```
+score_k = w_frozen · f_k + b_frozen   +   MLP_θ(f_k)
+          ─────────────────────────       ────────────
+          Linear head (FROZEN)             Residual (trainable, lr=3e-5)
+          Expert fewest-ops-left           Learns corrections
+```
+
+**7 hand-crafted features per valid (job, operation, machine) pair:**
+
+| # | Feature | Range | What it encodes |
+|---|---------|-------|-----------------|
+| 0 | remaining_ops / total | [0, 1] | Job proximity to completion |
+| 1 | processing_time / 10 | [0, 1] | Operation duration |
+| 2 | slack / T_max | [-1, 1] | Time buffer to due date |
+| 3 | machine_health / 100 | [0, 1] | Machine condition |
+| 4 | is_last_op | {0, 1} | Will this complete the job? |
+| 5 | progress | [0, 1] | Fraction of ops completed |
+| 6 | urgency | [-2, 2] | -slack / proc_time |
+
+**Expert weights:** `w = [-2.5, -3.5, 0.5, 0.5, 3.0, 2.0, 0.5]` — blends fewest-ops-left with SPT, optimised via grid search over 30 episodes.
+
+### Centralised Critic
+
+Trained on Agent 1 returns (r₁). Agent 2 uses a running-mean baseline `v₂ = EMA(r₂)` instead of the shared critic, because the critic predicts maintenance value (r₁) which is uninformative for scheduling advantages.
 
 ---
 
-## Implementation Status
+## Environment
 
-| Component | Status | Notes |
-|---|---|---|
-| Weibull + Kijima environment | ✅ Complete | 19 unit tests passing |
-| Resource dynamics + pipeline | ✅ Complete | 18 unit tests passing |
-| Action masking (both agents) | ✅ Complete | 13 unit tests passing |
-| Reward decomposition | ✅ Complete | 17 unit tests passing |
-| GAE + rollout buffer | ✅ Complete | 8 unit tests passing |
-| TGIN graph builder | ✅ Complete | 9 unit tests passing |
-| TGIN forward pass | ✅ Complete | Verified on GPU (RTX 3060) |
-| Agent 1 (MLP) | ✅ Complete | 105K parameters |
-| Agent 2 (TGIN) | ✅ Complete | 2.17M parameters |
-| Centralized critic | ✅ Complete | 587K parameters |
-| PettingZoo AEC environment | ✅ Complete | Full episode runs verified |
-| Integration tests | ✅ Complete | 15/15 passing |
-| Factory floor visualiser | ✅ Complete | Pygame, real-time |
-| MAPPO training loop | 🔧 In Progress | Fixing rollout collection |
-| Actor 2 PPO update | 🔧 In Progress | Proper importance sampling |
-| Tier 1 CP-SAT solver | 📋 Planned | Formulation complete, implementation pending |
-| Baseline comparisons | 📋 Planned | Random + rule-based + Tier 1 |
-| Training results | 📋 Pending | Awaiting training loop fix |
+| Parameter | Value |
+|-----------|-------|
+| Machines | 5 heterogeneous (CNC Mill, Lathe, Grinder, Press, CMM) |
+| Degradation | Weibull (β=2.2–3.2, η=700–1350h, MTBF=78–150 shifts) |
+| Repair model | Kijima Type I, q=0.5 (imperfect, diminishing returns) |
+| Jobs | 40 (batch at t=0), 2–6 ops each, ~166 total operations |
+| Processing time | 2–8 shifts per operation |
+| Horizon | 150 shifts |
+| Work/capacity ratio | 91.6% (heavily loaded) |
+| Resources | 3 consumable (spare parts, lubricants, tooling) + 3 renewable |
+| PM duration | 2 shifts, CM duration: 6 shifts |
+| Health gate | PM blocked if health > 75% |
+
+Weibull parameters grounded in industrial reliability literature (Mobley 2002, Jardine & Tsang 2006, Ebeling 2013).
+
+---
+
+## Reward Structure (v5 — Final)
+
+**Shared:**
+```
+R_shared = -40 × n_failures + 1.0 × n_completions    (λ=0.5 to each agent)
+```
+
+**Agent 1 (Maintenance):**
+```
+r₁ = -1.0×PM - 7.0×CM - 0.05×ordering - 0.005×inventory + 0.5×R_shared
+```
+
+**Agent 2 (Scheduling):**
+```
+r₂ = +0.5×assign - 0.3×wait + 5.0×jobs - 8.0×tard/T + 0.5×health + 0.5×R_shared
+```
+
+The reward underwent **6 major revisions**. Key removals: ΔRUL (33% noise, SNR=0.48), PM bonus (caused 120 PMs/ep), availability (punished PM), stockout (catch-22 with PM). See thesis Section 5.4 for full evolution.
+
+---
+
+## Training Pipeline
+
+### Phase 1 (Primary): 225k steps
+
+| Phase | Steps | Jobs | Failures | Key Event |
+|-------|-------|------|----------|-----------|
+| Exploration | 0–30k | 18.9 | 4.3 | Random policy |
+| Agent 1 learning | 30–100k | 19.8 | 3.2 | PM timing learned |
+| Convergence | 100–200k | 19.5 | 3.1 | Failures stabilised |
+| **ActionScorer init** | **200k** | **→ 24.3** | **2.7** | **Expert weights loaded** |
+| Stable | 200–225k | 24.3 | 2.7 | ✅ Final checkpoint |
+
+### Behavioural Cloning Experiment
+
+Before adopting expert weight initialisation, we attempted behavioural cloning (BC) to warm-start Agent 2:
+
+1. **Expert data:** 50 episodes of fewest-ops-left scheduling (28.2 jobs/ep), ~5,750 samples
+2. **BC training:** Cross-entropy loss on Agent 2's full forward pass (TGIN + ActionScorer)
+
+| Architecture | Accuracy | Random baseline |
+|-------------|----------|-----------------|
+| TGIN-only scorer | 15.2% | ~10% |
+| TGIN-only (higher LR) | 15.8% | ~10% |
+| Hybrid (features + TGIN) | 37.3% | ~10% |
+| Features-only (fast_mlp) | 37.1% | ~10% |
+
+**Failure analysis:**
+- **TGIN-only (15%):** GIN aggregation (sum over neighbours) destroys the "remaining operations" count. Information bottleneck in graph convolution.
+- **Hybrid (37%):** Near theoretical ceiling — when 3 valid pairs all have 2 remaining ops, expert picks one but BC penalises the equally-good alternatives.
+
+**Conclusion:** BC was abandoned in favour of direct linear weight initialisation. The expert policy (fewest-ops-left) reduces to 7 weights — no learning needed.
+
+### ActionScorer Evolution
+
+| Version | Architecture | Jobs | Problem |
+|---------|-------------|------|---------|
+| v1 | TGIN embeddings → MLP | 19–21 | TGIN can't encode scheduling features |
+| v2 | Features + TGIN hybrid | ~20 | RL still overrode features |
+| v3 | Pure feature MLP, expert init | 24–27 | RL corrupted weights in 200 eps |
+| **v4** | **Linear (frozen) + MLP residual** | **24.3** | **✅ Stable — frozen expert + learned corrections** |
+
+### RL Degradation Prevention
+
+Without freezing, the MLP residual head grows to magnitude ~4 within 600 RL episodes, overriding the frozen linear head (magnitude ~5). Jobs drop from 24 → 18. The frozen linear head guarantees a performance floor.
+
+---
+
+## Bug Registry
+
+**19 bugs** found and fixed across 4 categories. The most critical:
+
+| Bug | Impact | Fix |
+|-----|--------|-----|
+| **E4:** tick_all PM bypass | 238 PMs at h=100% | PM exclusively in _step_agent1 |
+| **E5:** Phantom -5/step penalty | r₁ off by -750/ep | Store applied (not requested) PMs |
+| **T2:** PPO mask mismatch | entropy stuck at 3.09 for 120k steps | Store mask in rollout buffer |
+| **T5:** ActionScorer not saved | Reset to random on every resume | Include in checkpoint |
+| **A1:** TGIN can't encode features | BC accuracy 15% (random) | Hand-crafted features |
+| **R5:** ΔRUL noise | 33% of r₁ was noise (SNR=0.48) | w_RUL = 0 |
+
+Full registry with root causes in thesis Appendix A.
 
 ---
 
 ## Setup
 
+### Prerequisites
+
+- Python 3.11+
+- CUDA 12.1+ (for GPU training) or CPU-only
+- ~4 GB disk space (checkpoints + TensorBoard logs)
+
+### Installation
+
 ```bash
-# 1. Clone
-git clone https://github.com/Zeleckto/MARL_MaintOptimization.git
-cd MARL_MaintOptimization
+# Clone
+git clone https://github.com/<your-username>/manufacturing_marl.git
+cd manufacturing_marl
 
-# 2. Create virtual environment
+# Virtual environment
 python -m venv venv
-source venv/Scripts/activate      # Windows Git Bash
-# source venv/bin/activate         # Linux/Mac
+source venv/bin/activate        # Linux/Mac
+venv\Scripts\activate           # Windows
 
-# 3. Install PyTorch with CUDA (RTX 3060, CUDA 12.4)
-pip install torch==2.6.0+cu124 --index-url https://download.pytorch.org/whl/cu124
+# Core dependencies
+pip install -r requirements.txt
 
-# 4. Install PyG
+# PyTorch Geometric (match your CUDA version)
+# CUDA 12.1:
 pip install torch-geometric
+pip install torch-scatter torch-sparse torch-cluster \
+    -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
+# CPU only:
+pip install torch-geometric
+pip install torch-scatter torch-sparse torch-cluster \
+    -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
 
-# 5. Install remaining dependencies
-pip install pettingzoo gymnasium ortools pygame pyyaml tensorboard pytest scipy matplotlib
-
-# 6. Verify GPU
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+# Verify installation
+python -m pytest tests/ -q --ignore=tests/test_degradation.py \
+    --ignore=tests/test_graph_builder.py --ignore=tests/test_gae.py
+python test_resources_exhaustive.py
 ```
 
+Expected: `55 passed` + `ALL RESOURCE DYNAMICS TESTS PASSED`.
+
+---
+
+## Usage
+
+### Training
+
 ```bash
-# Run unit tests (91 tests)
-python run_all_tests.py
-
-# Run integration tests (15 tests)
-python run_integration_tests.py
-
-# Launch factory visualiser
-python viz_factory.py
-
-# Train (once training loop is finalised)
+# Phase 1: Full training from scratch (500k steps ≈ 3333 episodes)
 python scripts/train.py --config configs/phase1.yaml --timesteps 500000
 
-# Evaluate
-python scripts/evaluate.py --checkpoint checkpoints/latest.pt --episodes 20
+# Resume from checkpoint (linear head auto-frozen, Agent 1 trainable)
+python scripts/train.py --config configs/phase1.yaml --timesteps 400000 \
+    --resume outputs/checkpoints/phase1_step_0200k.pt
+
+# Monitor training
+tensorboard --logdir outputs/runs/
 ```
 
----
+**On resume:** The script automatically freezes the ActionScorer linear head (preventing RL degradation), rebuilds Agent 2's optimizer with only trainable parameters, and skips loading Agent 2's optimizer state (architecture mismatch).
 
-## Visualiser Controls
-
-The factory floor visualiser (`viz_factory.py`) shows the environment running with a rule-based policy in real time.
-
-| Key | Action |
-|---|---|
-| `SPACE` | Pause / Resume |
-| `→` | Step one timestep (when paused) |
-| `↑` / `↓` | Speed (0.5× to 20×) |
-| `1` | Toggle Agent 1 brain panel (observation, masked actions, reward decomp) |
-| `2` | Toggle Agent 2 brain panel (TGIN graph, last assignment, reward decomp) |
-| `J` | Toggle Jobs panel (Kanban cards / press again for Gantt chart) |
-| `T` | Toggle Resource overlay (inventory + replenishment pipeline) |
-| `R` | Reset episode |
-| `Q` | Quit |
-
----
-
-## MDP Formulation
-
-**State:** `{h_m, v_m, σ_m, φ_m, λ_m, RUL_m}` per machine + `{K_r_avail, I_r, pending_orders[r,lag]}` resources + job/operation graph
-
-**Agents:** 2 cooperative agents under CTDE paradigm
-
-**Agent 1 (PDM):** `a1 = ({PM/CM/None}_{m∈M}, {order_qty}_{r∈R_consumable})`
-
-**Agent 2 (Job Shop):** `a2 = (job_id, op_idx, machine_id) ∪ {WAIT}`
-
-**Transition:** Weibull failure sampling + Kijima virtual age update + C32 inventory dynamics + Poisson arrivals (Phase 3)
-
-**Episode:** T_max = 200 steps (training), 500 steps (evaluation). 1 step = 1 shift (8 simulated hours). Termination = all jobs complete. Truncation = T_max hit (bootstrap V_φ(s_T), not 0).
-
-**Hardware:** NVIDIA RTX 3060 12GB. 4 parallel CPU envs → batched GPU forward pass.
-
----
-
-## Known Issues and Open Problems
-
-These are documented transparently as active research challenges:
-
-**1. Training loop not yet validated end-to-end.**
-The MAPPO rollout collection and PPO update have been implemented and unit-tested in isolation. A discovered bug — `env.step()` AEC ordering conflicts when called manually — has been fixed in integration tests by calling `env._step_agent1()`, `env._step_agent2()`, `env._resolve_physics()`, `env._compute_rewards()` directly. The `mappo_trainer.py` is being updated to reflect this fix. First training run not yet executed.
-
-**2. Actor 2 (TGIN) PPO update is approximate.**
-Proper PPO requires recomputing `π_θ2(a|o)` during each update epoch to form the importance sampling ratio `r_t(θ) = π_new/π_old`. For Agent 2, this requires reconstructing the tripartite graph from stored observations in each minibatch — non-trivial due to variable graph size. The current implementation uses stored log probs, making it closer to vanilla policy gradient than PPO. This is acknowledged and a proper fix is planned for Phase 2.
-
-**3. Tier 1 CP-SAT not yet implemented.**
-The mathematical formulation (38 constraints, 5 groups) is complete and documented. OR-Tools CP-SAT implementation is pending. Without Tier 1, comparison against optimal solutions is not yet possible.
-
-**4. Asymmetric convergence between agents.**
-Agent 1 (MLP, ~105K params) will converge much faster than Agent 2 (TGIN, ~2.17M params). During the gap, Agent 1 optimises against a poor scheduling policy, potentially learning suboptimal maintenance strategies that are hard to unlearn. Mitigation: Agent 2 pretraining against a scripted Agent 1 before joint training. Not yet implemented.
-
-**5. Reward hacking potential.**
-Identified degenerate policies: (a) never schedule jobs (tardiness = 0 but no completion reward), (b) never do PM (maintenance cost = 0 until failure cascade). Preventive measures are in place (completion bonus, failure penalty) but have not been stress-tested against a learning agent.
-
-**6. Graph builder `op_id_map` approximation.**
-In `jobshop_agent.py`, the mapping from `(job_id, op_idx)` to TGIN node index is reconstructed from `valid_pairs` rather than from the full pending-ops list. This is an approximation — operations not in `valid_pairs` (PENDING predecessors) get no node index mapping. Does not affect correctness of action selection (only READY ops are scored) but may affect gradient flow through TGIN during training. To be fixed properly during training loop refinement.
-
----
-
-## Theoretical Foundations
-
-- **Cassady & Kutanoglu (2005):** Joint optimization of maintenance and production reduces costs 15–30% vs independent approaches. This work extends to multi-machine flexible job shops.
-- **Yu et al. (2022):** MAPPO effectiveness in cooperative tasks. Shared critic with decentralized actors.
-- **Zhang et al. (2025):** GNN-DRL for train marshalling. Tripartite graph structure adapted for manufacturing.
-- **Xu et al. (2019):** Graph Isomorphism Network — maximal expressiveness among message-passing GNNs.
-- **Kijima (1989):** Virtual age models for imperfect repair.
-
----
-
-## Research Gap Addressed
-
-| Existing Work | Limitation | This Work |
-|---|---|---|
-| RL-based PDM | No production scheduling | Integrated PDM + Job Shop |
-| Job Shop RL | No machine health awareness | Health-aware scheduling via action masking and health bonus |
-| Train marshalling GNN | Different domain | Adapted tripartite structure for manufacturing |
-| MAPPO applications | Generic domains | Physics-informed: Weibull/Kijima/bathtub curve features |
-| Single-machine joint optimization | Scalability | Multi-machine flexible job shop |
-
----
-
----
-
-## Training Progress — Phase 1 Results
-
-> **Status as of March 2026:** Phase 1 training completed — 367,000 steps, 5,000+ episodes on RTX 3060 12GB.
-
-### What We Achieved
-
-| Metric | Early Training | Late Training | Direction |
-|---|---|---|---|
-| Machine Failures/Episode | 0.003 | 0.000 | 33% fewer — Agent 1 learning PM |
-| Jobs Completed/Episode | 20.0 | 20.0 | Stable — 100% throughput |
-| Avg Machine Health | 87.5% | 87.5% | Stable — proactive maintenance working |
-| Weighted Tardiness | 194.8 | 187.6 | 3.7% reduction |
-| Agent 2 Episode Return | +248 | +308 | 24% improvement — scheduling getting better |
-| Episode Length | ~1500 steps | ~1000 steps | 33% faster — jobs completing quicker |
-
-**Key finding:** Zero machine failures sustained from episode ~3,500 onwards. All 20 jobs complete every episode. Agent 1 (PDM) converged effectively to a proactive maintenance policy. Agent 2 (Job Shop) shows 24% return improvement even before proper PPO gradient updates were enabled — the health-aware dispatch signal and dense completion bonus were sufficient to improve scheduling without TGIN weight updates.
-
-### Training Problems Encountered and Fixed
-
-#### 1. PettingZoo AEC Ordering Conflict
-`env.step()` called manually outside `agent_iter()` caused agent ordering conflicts — Agent 2 could be assigned to a machine Agent 1 had just sent to maintenance in the same timestep. **Fix:** Call `env._step_agent1()`, `env._step_agent2()`, `env._resolve_physics()`, `env._compute_rewards()` directly, bypassing the AEC selector entirely.
-
-#### 2. Agent 2 PPO backward() Crash
-`old_lp2` stored during rollout collection is a plain numpy array converted to tensor — no computation graph attached. Calling `.backward()` on a loss involving it fails with no gradient path error. **Fix:** Added `jobshop_agent.get_log_prob(obs_dict, action_idx)` which runs a fresh TGIN forward pass on the stored observation dict, creating a live computation graph through current TGIN weights. The returned log prob IS differentiable. PPO ratio now correctly computed as `exp(new_lp2 - old_lp2)`. Each minibatch sample requires one TGIN forward pass (cannot be batched due to variable graph sizes).
-
-#### 3. Device Mismatch (CPU vs CUDA)
-During PPO update, tensors created from stored numpy arrays defaulted to CPU while model weights were on `cuda:0`. Caused `RuntimeError: Expected all tensors to be on the same device`. All `torch.tensor()` calls in `ppo_update.py` now explicitly `.to(device)` where device is inferred from `next(model.parameters()).device`.
-
-#### 4. venv Corruption on Python 3.13 + Windows
-`distutils-precedence.pth` in site-packages calls `_distutils_hack.add_shim()` which was removed in Python 3.13. This fires on every Python startup and leaves packages in a half-initialised state — `yaml`, `numpy`, `torch` all appear to import but lose their attributes (`safe_load`, `ndarray`, `cuda`). Rebuilding the venv does not permanently fix it since `pip install` recreates the file. **Fix:** `start.sh` truncates this file to zero bytes every session before any imports.
-
-#### 5. __init__.py Auto-Imports Causing Circular Imports
-Non-empty `__init__.py` files trigger circular import chains during Python startup, corrupting package initialisation before packages finish loading. All `__init__.py` files must be empty — they are package markers only, not import aggregators. `start.sh` clears these automatically every session.
-
-#### 6. Action Index Out of Bounds in TGIN
-TGIN graph contains ALL pending operations (PENDING + READY + IN_PROGRESS). `valid_pairs` contains only READY operations. The `op_id_map` was using valid_pairs indices as TGIN node indices — goes out of bounds when graph has more op nodes than valid pairs. **Fix:** Index clamped to `min(idx, n_op_nodes - 1)` in `action_scorer.py`.
-
----
-
-## Every-Session Startup
-
-Due to Python 3.13 + Windows venv issues, run this **every time** before anything else:
+### Evaluation
 
 ```bash
-source start.sh
+# MARL vs all baselines (3 seed sets × 30 episodes = 90 total)
+python scripts/eval_checkpoint.py \
+    --checkpoint outputs/checkpoints/phase1_step_0225k.pt \
+    --seed-sets 3 --episodes 30 \
+    --outdir outputs/eval_phase1
 ```
 
-This script (in project root) automatically:
-1. Activates venv if not already active
-2. Truncates `distutils-precedence.pth` — the root cause of all package corruption
-3. Clears all `__init__.py` files — prevents circular import cascade
-4. Verifies yaml, numpy, torch, pygame all load correctly
-5. Prints all common training and evaluation commands
+### Ablation Study
 
-Without `start.sh`, yaml/numpy/torch will appear to import but silently lose attributes, causing cryptic `AttributeError: module 'yaml' has no attribute 'safe_load'` errors throughout.
+```bash
+# Full ablation suite: 11 ablations + sensitivity sweeps + baselines + stats
+python scripts/run_all_ablations.py \
+    --checkpoint outputs/checkpoints/phase1_step_0225k.pt \
+    --episodes 30
+```
+
+Runs 25+ configurations:
+
+| ID | Ablation | Tests |
+|----|----------|-------|
+| A0 | MARL baseline | Reference |
+| A1 | No shared reward (λ=0) | Cooperation value |
+| A2 | No health gate | PM constraint necessity |
+| A3 | No assignment bonus | Dense signal value |
+| A4 | No PM (Agent 1 off) | PM learning contribution |
+| A5 | FCFS scheduling | Scheduling learning vs FCFS |
+| A6 | Random scheduling | Lower bound |
+| A7 | SPT scheduling | Standard heuristic |
+| A8 | Both random | Absolute lower bound |
+| A9 | Tight inventory (inv=15) | Phase 2 proxy |
+| A10 | Stochastic processing | Phase 3 proxy |
+| A11 | λ sweep (0.0–1.0) | Coupling sensitivity |
+| A12 | Zero-shot M=5→10 | Scalability |
+| A13 | c_fail sweep (10–60) | Failure cost sensitivity |
+| A14 | c_PM sweep (0.5–5.0) | PM cost sensitivity |
+
+Output: `outputs/ablation_study/` with Excel, CSVs, 3 plot types, statistical tests, auto-generated report.
+
+### Analysis
+
+```bash
+# Training curves (pre-BC vs post-BC impact analysis)
+python scripts/training_impact_analysis.py --outdir outputs/results/training
+
+# Training analysis from TensorBoard
+python scripts/analyze_training.py \
+    --runs outputs/runs/phase1_XXXXXXX outputs/runs/phase1_YYYYYYY \
+    --outdir outputs/results/training
+
+# Statistical inference (reads ablation CSVs, no re-evaluation)
+python scripts/statistical_inference.py \
+    --datadir outputs/ablation_study \
+    --outdir outputs/statistical_analysis
+
+# Identify TensorBoard run folders
+python scripts/identify_runs.py --rundir outputs/runs/
+
+# Resource inventory analysis (sawtooth plots)
+python analyze_resources.py --seed 42
+
+# Regenerate ablation plots from saved CSV
+python scripts/regenerate_plots.py --datadir outputs/ablation_study
+```
+
+### Tests
+
+```bash
+# Unit tests (55 tests covering rewards, masking, inventory, Kijima)
+python -m pytest tests/ -q --ignore=tests/test_degradation.py \
+    --ignore=tests/test_graph_builder.py --ignore=tests/test_gae.py
+
+# Resource dynamics tests (28 tests: PM/CM consumption, sawtooth, ordering)
+python test_resources_exhaustive.py
+```
 
 ---
 
-## Upcoming Steps
+## Project Structure
 
-### Immediate
-- Resume Phase 1 for remaining 133k steps: `bash train.sh --timesteps 133000 --resume checkpoints/latest.pt`
-- Run baseline comparison: `python benchmarks/run_benchmarks.py --checkpoint checkpoints/latest.pt`
-- Verify Agent 2 PPO updating — watch `train/actor2_loss` in TensorBoard (should now appear and decrease)
+```
+manufacturing_marl/
+│
+├── configs/
+│   ├── base.yaml                 # Environment + hyperparameters
+│   └── phase1.yaml               # Phase 1 config
+│
+├── environments/
+│   ├── mfg_env.py                # PettingZoo AEC environment (main file)
+│   ├── spaces/
+│   │   ├── action_spaces.py      # Action masking (h<75% PM gate)
+│   │   └── observation_spaces.py # Observation space definitions
+│   └── transitions/
+│       ├── degradation.py        # Weibull degradation + Kijima repair
+│       ├── job_dynamics.py       # Job/operation processing logic
+│       ├── resource_dynamics.py  # Consumable + renewable resource management
+│       └── failure_handler.py    # Stochastic failure + CM triggering
+│
+├── agents/
+│   ├── pdm_agent.py              # Agent 1: MLP policy for PM + reorder
+│   └── jobshop_agent.py          # Agent 2: TGIN + ActionScorer wrapper
+│
+├── models/
+│   ├── critic.py                 # Centralised critic (trained on r₁)
+│   ├── mlp_policy.py             # MLP policy (used by Agent 1)
+│   └── tgin/
+│       ├── tgin.py               # Temporal Graph Isomorphism Network
+│       ├── action_scorer.py      # Hybrid scorer: linear (frozen) + MLP residual
+│       └── graph_builder.py      # Builds HeteroData from observations
+│
+├── rewards/
+│   ├── reward_fn.py              # Main reward dispatcher
+│   ├── reward_weights.yaml       # All weights (v5 final)
+│   └── components/
+│       ├── maintenance_reward.py # r₁ computation
+│       ├── scheduling_reward.py  # r₂ computation
+│       └── shared_reward.py      # R_shared computation
+│
+├── training/
+│   ├── mappo_trainer.py          # Main training loop (mask storage, v2=r2_mean)
+│   ├── ppo_update.py             # PPO clipped objective with stored masks
+│   └── rollout_buffer.py         # Experience buffer with action mask support
+│
+├── utils/
+│   ├── checkpoint.py             # Save/load (includes ActionScorer weights)
+│   └── logger.py                 # TensorBoard logging
+│
+├── benchmarks/
+│   └── baselines.py              # 4 heuristic baselines (Reactive, Fixed-PM, ABR, Rule-EDF)
+│
+├── analytics/
+│   ├── episode_kpis.py           # 24 conference-grade KPIs
+│   ├── excel_writer.py           # Excel output utilities
+│   └── plot_utils.py             # Plotting utilities
+│
+├── scripts/
+│   ├── train.py                  # Training entry point (linear head freeze on resume)
+│   ├── eval_checkpoint.py        # MARL vs baselines evaluation
+│   ├── run_all_ablations.py      # Full ablation suite (25+ configs)
+│   ├── statistical_inference.py  # Pairwise tests, Pareto, win rates
+│   ├── bc_warmstart.py           # Behavioural cloning experiment
+│   ├── training_impact_analysis.py # Pre-BC vs post-BC comparison
+│   ├── analyze_training.py       # TensorBoard → curves + early/late analysis
+│   ├── extract_tensorboard.py    # TB → CSV/Excel export
+│   ├── identify_runs.py          # Identify TB run folders
+│   └── regenerate_plots.py       # Regenerate plots from saved CSVs
+│
+├── tests/                        # 55 unit tests
+├── run_baselines.py              # Standalone baseline benchmark suite
+├── analyze_resources.py          # Inventory sawtooth analysis
+├── compare_results.py            # Standalone statistical comparison
+├── test_resources_exhaustive.py  # 28 resource dynamics tests
+│
+├── thesis.tex                    # Full LaTeX thesis (1287 lines)
+├── requirements.txt              # Python dependencies
+├── .gitignore
+└── README.md
+```
 
-### Weeks 2-3
-- Phase 2 training — add LogNormal processing times + Beta repair effectiveness; resume from Phase 1 checkpoint
-- Implement proper critic update — store global state in rollout buffer, run critic forward in PPO epochs
-- Reward normalisation — clip rewards to [-1,1] per step to reduce advantage noise (currently oscillates -12 to +5)
-- Tier 1 CP-SAT for M=3, J=5 — ground-truth optimal comparison for small instances
+---
 
-### Paper
-- Phase 3 training — Poisson arrivals + full stochasticity
-- Comparison table: MARL vs Random vs Rule-Based (EDF) vs Fixed-Interval PM vs Tier 1 (small)
-- Ablation: joint optimisation vs separate maintenance+scheduling policies
-- Target venue: Reliability Engineering & System Safety or IISE Transactions
+## Key Design Decisions
 
+### 1. Health Gate (h < 75%)
 
-<div align="center">
+Without this constraint, any positive PM reward signal causes 120+ PMs/episode (31% of capacity wasted). The hard gate is enforced in both execution (`_step_agent1`) and action masking (`action_spaces.py`). Baselines run with `bypass_health_gate=True` to use their own PM timing.
 
-*Indian Institute of Technology Delhi — Mechanical Engineering*
+### 2. Expert-Initialised Frozen Linear Head
 
-*BTP2 (MCD412) — February–May 2026*
+RL cannot improve on the expert initialisation in this setting. Within 200 RL episodes, gradient updates corrupt the expert weights and jobs drop from 24 → 18. The frozen linear head guarantees a performance floor while the MLP residual learns corrections (urgency tie-breaking, health-aware routing).
 
-</div>
+### 3. Running-Mean Baseline for Agent 2
 
-</div>
+Using the centralised critic (trained on r₁) for Agent 2 advantages produced noise — the critic predicts maintenance value, which is uninformative for scheduling. The running-mean baseline `v₂ = EMA(r₂)` is simpler but correct: advantages reflect per-step scheduling quality.
 
+### 4. Action Mask in PPO Update
 
-## 📊 Training Results
+The action mask must be stored during rollout collection and reapplied during the PPO update. Without stored masks, importance ratios are corrupted (collection uses masked distribution, update uses unmasked). This caused Agent 1's entropy to remain stuck at 3.09 for 120k steps.
 
-<p align="center">
-  <img src="Results/early_late_comparison.png" width="30%" />
-  <img src="Results/maintenance_analysis.png" width="30%" />
-  <img src="Results/training_analysis.png" width="30%" />
-</p>
+### 5. Bypass Health Gate for Baselines
+
+Baselines like Fixed-PM (PM every 30 shifts, when health=97%) are blocked by the h<75% gate designed for training. The `bypass_health_gate` flag (default `False`, set `True` for evaluation) lets baselines use their own PM timing.
+
+---
+
+## Reproducing Results
+
+```bash
+# 1. Train Phase 1 from scratch
+python scripts/train.py --config configs/phase1.yaml --timesteps 225000
+
+# 2. Evaluate trained checkpoint
+python scripts/eval_checkpoint.py \
+    --checkpoint outputs/checkpoints/latest.pt \
+    --seed-sets 3 --episodes 30
+
+# 3. Run ablation study
+python scripts/run_all_ablations.py \
+    --checkpoint outputs/checkpoints/latest.pt
+
+# 4. Statistical analysis
+python scripts/statistical_inference.py --datadir outputs/ablation_study
+
+# 5. Training analysis
+python scripts/training_impact_analysis.py
+```
+
+**Hardware used:** NVIDIA GPU with CUDA 12.1, ~2 hours for 225k steps. CPU training possible but ~10x slower.
+
+**Expected output:** Results within ±1 standard deviation of reported values. Exact reproduction requires fixing all random seeds (environment, PyTorch, numpy).
+
+---
+
+## Citation
+
+```bibtex
+@thesis{jha2026marl_manufacturing,
+  title   = {Multi-Agent Reinforcement Learning for Joint Predictive 
+             Maintenance and Flexible Job Shop Scheduling in 
+             Stochastic Manufacturing Environments},
+  author  = {Jha, Shreenath and Gehlot, Kirtan},
+  year    = {2026},
+  school  = {Indian Institute of Technology Delhi},
+  type    = {B.Tech Project (MCD412)},
+  advisor = {Kumari, Minakshi}
+}
+```
+
+## Acknowledgements
+
+We thank Dr. Minakshi Kumari for supervision and guidance throughout this project.
+
+## License
+
+Academic use only. IIT Delhi B.Tech Project.
